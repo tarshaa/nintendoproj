@@ -7,11 +7,17 @@
 typedef struct {int x,y;} P;
 static uint16_t *fb;static const Brooklyn *state;
 #define RGB(hex) ((((hex)>>19)&31)|((((hex)>>11)&31)<<5)|((((hex)>>3)&31)<<10)|32768)
-static void rect(int x,int y,int w,int h,uint16_t c){int a=(int)floorf(x*.5f),b=(int)floorf(y*.5f),ex=(x+w+1)/2,ey=(y+h+1)/2;for(int j=b<0?0:b;j<ey&&j<192;j++)for(int i=a<0?0:a;i<ex&&i<256;i++)fb[j*256+i]=c;}
+static void rect(int x,int y,int w,int h,uint16_t c){int a=x>=0?x/2:(x-1)/2,b=y>=0?y/2:(y-1)/2,ex=(x+w+1)/2,ey=(y+h+1)/2;
+ if(a<0)a=0;
+ if(b<0)b=0;
+ if(ex>256)ex=256;
+ if(ey>192)ey=192;
+ if(a>=ex||b>=ey)return;
+ for(int j=b;j<ey;j++){uint16_t*row=fb+j*256;for(int i=a;i<ex;i++)row[i]=c;}}
 static P proj(float x,float z,float y){return(P){(int)roundf(256+x*22+(z-state->cam)*5),(int)roundf(280-(z-state->cam)*13-y*21)};}
-static void line(P a,P b,uint16_t c,int width){int dx=abs(b.x-a.x),sx=a.x<b.x?1:-1,dy=-abs(b.y-a.y),sy=a.y<b.y?1:-1,err=dx+dy;for(;;){rect(a.x,a.y,width,width,c);if(a.x==b.x&&a.y==b.y)break;int e=2*err;if(e>=dy){err+=dy;a.x+=sx;}if(e<=dx){err+=dx;a.y+=sy;}}}
+static void line(P a,P b,uint16_t c,int width){if((a.x+width<0&&b.x+width<0)||(a.x>=512&&b.x>=512)||(a.y+width<0&&b.y+width<0)||(a.y>=384&&b.y>=384))return;int dx=abs(b.x-a.x),sx=a.x<b.x?1:-1,dy=-abs(b.y-a.y),sy=a.y<b.y?1:-1,err=dx+dy;for(;;){rect(a.x,a.y,width,width,c);if(a.x==b.x&&a.y==b.y)break;int e=2*err;if(e>=dy){err+=dy;a.x+=sx;}if(e<=dx){err+=dx;a.y+=sy;}}}
 static void poly(P *p,int n,uint16_t c,bool brick){int lo=384,hi=0;for(int i=0;i<n;i++){if(p[i].y<lo)lo=p[i].y;if(p[i].y>hi)hi=p[i].y;}if(lo<0)lo=0;if(hi>383)hi=383;
- for(int y=lo;y<=hi;y++){int xs[8],num=0;for(int i=0;i<n;i++){P a=p[i],b=p[(i+1)%n];if((a.y<=y&&b.y>y)||(b.y<=y&&a.y>y))xs[num++]=a.x+(y-a.y)*(b.x-a.x)/(b.y-a.y);}for(int i=1;i<num;i++)for(int j=i;j>0&&xs[j]<xs[j-1];j--){int t=xs[j];xs[j]=xs[j-1];xs[j-1]=t;}for(int i=0;i+1<num;i+=2){rect(xs[i],y,xs[i+1]-xs[i]+1,1,c);if(brick){if(y%7==0)rect(xs[i],y,xs[i+1]-xs[i]+1,1,RGB(0xefc7a5));else for(int x=xs[i];x<=xs[i+1];x++)if((x-(y/7%2)*8)%17==0)rect(x,y,1,1,RGB(0xefc7a5));}}}
+ for(int y=lo;y<=hi;y++){int xs[8],num=0;for(int i=0;i<n;i++){P a=p[i],b=p[(i+1)%n];if((a.y<=y&&b.y>y)||(b.y<=y&&a.y>y))xs[num++]=a.x+(y-a.y)*(b.x-a.x)/(b.y-a.y);}for(int i=1;i<num;i++)for(int j=i;j>0&&xs[j]<xs[j-1];j--){int t=xs[j];xs[j]=xs[j-1];xs[j-1]=t;}for(int i=0;i+1<num;i+=2){rect(xs[i],y,xs[i+1]-xs[i]+1,1,c);if(brick){if(y%7==0)rect(xs[i],y,xs[i+1]-xs[i]+1,1,RGB(0xefc7a5));else {int left=xs[i]<0?0:xs[i],right=xs[i+1]>511?511:xs[i+1];int rem=(left-(y/7%2)*8)%17;if(rem<0)rem+=17;for(int x=left+(17-rem)%17;x<=right;x+=17)rect(x,y,1,1,RGB(0xefc7a5));}}}}
  for(int i=0;i<n;i++)line(p[i],p[(i+1)%n],RGB(0x243026),1);
 }
 static void floor_tile(float a,float b,float z,float d,float h,uint16_t c){P v[]={proj(a,z,h),proj(b,z,h),proj(b,z+d,h),proj(a,z+d,h)};poly(v,4,c,false);}

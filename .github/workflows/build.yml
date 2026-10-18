@@ -29,3 +29,5 @@ jobs:
           node tests/reference_parity.js /tmp/brooklyn-trace
           cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/brooklyn_render.c tests/brooklyn_render_test.c -lm -o /tmp/render-tests
           /tmp/render-tests
+          cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/input_queue.c tests/input_timing_test.c -lm -o /tmp/timing-tests
+          /tmp/timing-tests

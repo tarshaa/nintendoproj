@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "game.h"
+#include "input_queue.h"
 #include "brooklyn_render.h"
 #include "calendar.h"
 #include <time.h>
@@ -22,12 +23,16 @@ static bool storage, camera_ready,transfer,has_frame;
 static CameraDevice camera=CAMERA_OUTER;
 static int pending_camera,frame_wait,selection,save_id,ids[1000],count,chosen;
 static char message[64];
+static InputQueue inputs;
+static unsigned render_ticks=1;
+static void sample_input(void){scanKeys();input_push(&inputs,(InputSample){keysDown(),keysHeld()});}
+static void clear_inputs(void){int irq=enterCriticalSection();inputs.start=inputs.count=0;leaveCriticalSection(irq);}
 static Game game;
 static Brooklyn brooklyn;
 static bool active_brooklyn;
 static Date dates[1000],selected_date;
 static unsigned today(void){time_t t=time(NULL);struct tm *d=localtime(&t);Date v={d?d->tm_year+1900:2026,d?d->tm_mon+1:10,d?d->tm_mday:18};if(!date_valid(v))v=(Date){2026,10,18};return date_pack(v);}
-static void reset_game(void){game_reset(&game);brooklyn_reset(&brooklyn);}
+static void reset_game(void){clear_inputs();game_reset(&game);brooklyn_reset(&brooklyn);}
 typedef enum {HOME,CAMERA,REVIEW,LIBRARY,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN} State;
 static State state=HOME;
 static u16 sky=RGB15(12,22,31),grass=RGB15(12,25,8);
@@ -156,7 +161,7 @@ static void render(void){
  case PLAY:
  if(active_brooklyn){brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,28,WHITE);char line[40];snprintf(line,sizeof(line),"RETURN THE BAG    FLAGS %d OF 3",brooklyn.checkpoint);text(frame,7,4,line,INK);text(frame,7,16,brooklyn.weather_left<3?"GUST CHANGING SOON":brooklyn.wind==1?"TAILWIND":brooklyn.wind==2?"CROSSWIND - STEER LEFT":"CALM",INK);rect(frame,0,166,256,26,WHITE);text(frame,3,170,brooklyn.z<11?"UP FORWARD  LEFT RIGHT STEER":brooklyn.z<18?"HOLD UP - TAP A BEFORE GAP":brooklyn.z<30?"HOLD B AND UP TO DUCK UNDER":brooklyn.z<46?"HOLD UP AND A TO GLIDE":brooklyn.z<54?"LAST GAP - HOLD UP AND A":"RETURN BAG TO THE PERSON",INK);text(frame,3,182,"A JUMP-HOLD GLIDE B DUCK START PAUSE",INK);}else draw_game();break;
  case PAUSE:title("PAUSED");text(frame,12,65,"START - RESUME",INK);text(frame,12,90,"A - RESTART",INK);text(frame,12,115,"B - HOME",INK);break;
- case WIN:if(active_brooklyn){brooklyn.reward+=1.f/60;brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,31,WHITE);text(frame,44,9,brooklyn.reward>4?"IT WAS FOR YOU":"DELIVERED",INK);rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);break;}title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
+ case WIN:if(active_brooklyn){brooklyn.reward+=render_ticks/60.f;brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,31,WHITE);text(frame,44,9,brooklyn.reward>4?"IT WAS FOR YOU":"DELIVERED",INK);rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);break;}title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
  case LOSE:title("TIME IS UP");text(frame,20,80,"YOUR WORLD IS STILL SAVED",INK);text(frame,20,115,"A RETRY  B HOME",INK);break;
  case ERROR_SCREEN:title("COULD NOT CONTINUE");text(frame,8,65,message,INK);text(frame,12,125,"B - HOME",INK);break;
  }
@@ -169,7 +174,9 @@ int main(void){
  int b=bgInitSub(3,BgType_Bmp16,BgSize_B16_256x256,0,0);
  top=bgGetGfxPtr(t);bottom=bgGetGfxPtr(b);rect(top,0,0,W,H,RGB15(16,23,29));text(top,65,88,"PHOTO WORLDS",WHITE);
  storage=fatInitDefault();if(storage){struct stat st;if(stat("sd:/photo-worlds",&st)!=0)storage=mkdir("sd:/photo-worlds",0777)==0;else storage=S_ISDIR(st.st_mode);}
- while(1){swiWaitForVBlank();scanKeys();int p=keysDown(),held=keysHeld();
+ irqSet(IRQ_VBLANK,sample_input);irqEnable(IRQ_VBLANK);
+ while(1){swiWaitForVBlank();InputSample samples[INPUT_CAPACITY];int irq=enterCriticalSection();unsigned n=input_drain(&inputs,samples);leaveCriticalSection(irq);
+ int p=0;for(unsigned i=0;i<n;i++)p|=samples[i].pressed;render_ticks=n;
  switch(state){
  case HOME:
  if(p&(KEY_UP|KEY_DOWN))selection^=1;
@@ -184,8 +191,15 @@ int main(void){
  if(p&KEY_TOUCH){touchPosition t;touchRead(&t);if(t.px>=10&&t.px<255&&t.py>=45&&t.py<147){int d=(t.py-45)/17*7+(t.px-10)/35-date_weekday((Date){selected_date.year,selected_date.month,1})+1;if(d>0&&d<=date_days(selected_date.year,selected_date.month)){if(d==selected_date.day)p|=KEY_A;else{selected_date.day=d;moved=true;}}}}
  if(moved)calendar_preview(false);else if(p&KEY_X)calendar_preview(true);
  if((p&KEY_A)&&chosen>=0&&load_world(ids[chosen])){reset_game();state=PLAY;}break;}
- case PLAY:if(p&KEY_START)state=PAUSE;else if(active_brooklyn){brooklyn_step(&brooklyn,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),!!(held&KEY_UP)-!!(held&KEY_DOWN),p&KEY_A,held&KEY_B,held&KEY_A);if(brooklyn.won)state=WIN;if(brooklyn.lost)state=LOSE;}else{game_step(&game,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),p&KEY_A,held&KEY_B);if(game.won)state=WIN;if(game.lost)state=LOSE;}break;
- case PAUSE:if(p&KEY_START)state=PLAY;else if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;
+ case PLAY:
+ // Replay every display-tick input in order, even if drawing skipped frames.
+ for(unsigned i=0;i<n&&state==PLAY;i++){
+ int edge=samples[i].pressed,held=samples[i].held;
+ if(edge&KEY_START){state=PAUSE;clear_inputs();break;}
+ if(active_brooklyn){brooklyn_step(&brooklyn,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),!!(held&KEY_UP)-!!(held&KEY_DOWN),edge&KEY_A,held&KEY_B,held&KEY_A);if(brooklyn.won)state=WIN;if(brooklyn.lost)state=LOSE;}
+ else{game_step(&game,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),edge&KEY_A,held&KEY_B);if(game.won)state=WIN;if(game.lost)state=LOSE;}
+ }break;
+ case PAUSE:if(p&KEY_START){clear_inputs();state=PLAY;}else if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;
  case WIN:case LOSE:if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;
  case ERROR_SCREEN:if(p&KEY_B)state=HOME;break;
  }
