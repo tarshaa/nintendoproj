@@ -1,38 +1,27 @@
 #include "brooklyn.h"
+#include <math.h>
 #include <string.h>
-static unsigned random_next(Brooklyn*g){g->random=g->random*1664525u+1013904223u;return g->random;}
-bool brooklyn_ground(float x){return !((x>145&&x<179)||(x>405&&x<510)||(x>661&&x<702));}
-bool brooklyn_in_fan(float x){return x>=355&&x<=510;}
-void brooklyn_reset(Brooklyn*g){
- memset(g,0,sizeof(*g));g->x=24;g->y=BROOKLYN_FLOOR;g->grounded=true;
- g->random=0xB400C1u;g->weather_left=420;g->next_wind=1;
-}
-void brooklyn_step(Brooklyn*g,int direction,bool jump,bool duck,bool glide){
+static const float checkpoints[]={2,20,32,48};
+static bool gap(float z){return(z>13&&z<16)||(z>36&&z<43)||(z>49&&z<52);}
+void brooklyn_reset(Brooklyn*g){memset(g,0,sizeof(*g));g->z=g->cam=2;g->grounded=true;g->weather_left=8;g->random=0xb400c1;}
+void brooklyn_step(Brooklyn*g,int sideways,int forward,bool jump,bool duck,bool glide){
+ const float dt=1.f/60;
  if(g->won||g->lost)return;
- if(++g->ticks>=BROOKLYN_TIME){g->lost=true;return;}
- if(--g->weather_left<=0){g->wind=g->next_wind;g->next_wind=(g->wind+1+random_next(g)%2)%3;g->weather_left=420+random_next(g)%181;}
- bool beneath=g->x+6>230&&g->x-6<285&&g->y>136;
- g->duck=(duck||beneath)&&g->grounded;
- float oldx=g->x,oldy=g->y;
- if(jump&&g->grounded&&!g->duck){g->vy=-5.9f;g->grounded=false;}
- g->gliding=glide&&!g->grounded;
- float gust=g->grounded?0:(g->wind==1?0.25f:g->wind==2?-0.25f:0);
- g->x+=direction*(g->duck?1.05f:1.85f)+gust;
- if(g->x<8)g->x=8;
- if(g->x>BROOKLYN_END)g->x=BROOKLYN_END;
- int height=g->duck?9:20;
- if(g->x+6>230&&g->x-6<285&&g->y>105&&g->y-height<136)g->x=oldx;
- g->vy+=g->gliding?0.10f:0.29f;
- if(g->gliding&&g->vy>0.7f)g->vy=0.7f;
- if(g->gliding&&brooklyn_in_fan(g->x)){g->vy-=0.20f;if(g->vy<-1.4f)g->vy=-1.4f;}
- g->y+=g->vy;g->grounded=false;
- if(g->y<44){g->y=44;g->vy=0;}
- if(g->vy>=0&&oldy<=105&&g->y>=105&&g->x+5>230&&g->x-5<285){g->y=105;g->vy=0;g->grounded=true;}
- if(g->vy>=0&&oldy<=BROOKLYN_FLOOR&&g->y>=BROOKLYN_FLOOR&&brooklyn_ground(g->x)){g->y=BROOKLYN_FLOOR;g->vy=0;g->grounded=true;}
- if(g->grounded&&g->x>=195&&g->x<220)g->checkpoint=200;
- if(g->grounded&&g->x>=325&&g->x<355)g->checkpoint=335;
- if(g->grounded&&g->x>=545&&g->x<620)g->checkpoint=550;
- if(g->grounded&&g->x>=730)g->checkpoint=740;
- if(g->y>205){g->falls++;g->x=g->checkpoint?g->checkpoint:24;g->y=BROOKLYN_FLOOR;g->vy=0;g->grounded=true;g->gliding=false;}
- if(g->x>=875&&g->grounded)g->won=true;
+ if(jump&&g->y==0){g->y=.01f;g->vy=10;}
+ g->ticks++;g->time+=dt;g->weather_left-=dt;
+ if(g->weather_left<0){g->wind=(g->wind+1)%3;g->random=g->random*1664525u+1013904223u;g->weather_left=7+(g->random>>8)*(5.f/16777216.f);}
+ g->duck=duck||(g->z>26&&g->z<29&&g->y<1);
+ float diagonal=sideways&&forward?.70710678118f:1,speed=g->duck?3.8f:g->wind==1?9:8;
+ float next=fmaxf(1,g->z+forward*diagonal*speed*dt);
+ if(!duck&&((g->z<=26&&next>26)||(g->z>=29&&next<29)))next=g->z;
+ g->z=next;g->x+=sideways*diagonal*speed*dt;
+ if(g->wind==2&&g->z>18&&!g->duck)g->x+=1.8f*dt;
+ g->duck=duck||(g->z>26&&g->z<29&&g->y<1);
+ g->gliding=glide&&g->y>0&&!g->duck;
+ if(g->gliding&&g->z>35&&g->z<45&&g->y<4)g->vy=fmaxf(g->vy,2);
+ if(g->y>0){g->vy-=(g->gliding?5:22)*dt;if(g->gliding)g->vy=fmaxf(-1.6f,g->vy);g->y=fmaxf(0,g->y+g->vy*dt);if(g->y==0)g->vy=0;}
+ if(fabsf(g->x)>5.2f||(g->y==0&&gap(g->z))){g->x=0;g->z=checkpoints[g->checkpoint];g->y=g->vy=0;g->falls++;g->gliding=false;}
+ for(int i=1;i<4;i++)if(g->z>=checkpoints[i]&&g->y==0&&i>g->checkpoint)g->checkpoint=i;
+ g->grounded=g->y==0;g->cam+=(g->z-g->cam)*(dt*5);
+ if(g->z>=65&&fabsf(g->x)<2.3f&&g->y==0)g->won=true;
 }

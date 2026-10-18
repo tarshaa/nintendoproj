@@ -11,3 +11,5 @@ Genre goals: shooter means movement, aiming and shooting under pressure; adventu
 Save source photo and sufficient game data for offline replay. Do not claim online generation works until photo upload and retrieval are tested on hardware. Keep API credentials on the server. No private NAND dumps, photos or credentials in GitHub.
 
 User designs visual moments later. Initial implementation may use plain UI. Hardware capability and actual playability take priority now.
+
+2026-10-18 correction: Preserve the original Special Delivery angled depth-scrolling game, camera follow, layout, movement and details. Do not replace it with a side-scrolling platformer or redesign it from memory. Source recovered from October 13 conversation history.

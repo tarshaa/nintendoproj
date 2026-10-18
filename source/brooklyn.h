@@ -2,17 +2,13 @@
 #define BROOKLYN_H
 #include <stdbool.h>
 #include <stdint.h>
-#define BROOKLYN_FLOOR 150
-#define BROOKLYN_END 920
-#define BROOKLYN_TIME (75*60)
+// Coordinates and movement match the recovered Special Delivery browser prototype.
 typedef struct {
- float x,y,vy;
- int ticks,checkpoint,falls,wind,next_wind,weather_left;
+ float x,z,y,vy,cam,time,weather_left,reward;
+ int ticks,checkpoint,falls,wind;
  uint32_t random;
  bool grounded,duck,gliding,won,lost;
 } Brooklyn;
 void brooklyn_reset(Brooklyn *g);
-void brooklyn_step(Brooklyn *g,int direction,bool jump,bool duck,bool glide);
-bool brooklyn_ground(float x);
-bool brooklyn_in_fan(float x);
+void brooklyn_step(Brooklyn *g,int sideways,int forward,bool jump,bool duck,bool glide);
 #endif

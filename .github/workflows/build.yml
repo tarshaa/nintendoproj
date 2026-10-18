@@ -23,5 +23,9 @@ jobs:
         run: |
           cc -Wall -Wextra -Werror -fsanitize=address,undefined source/game.c tests/game_test.c -o /tmp/game-tests
           /tmp/game-tests
-          cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/calendar.c tests/brooklyn_test.c -o /tmp/brooklyn-tests
+          cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/calendar.c tests/brooklyn_test.c -lm -o /tmp/brooklyn-tests
           /tmp/brooklyn-tests
+          cc -Wall -Wextra -Werror source/brooklyn.c tests/brooklyn_trace.c -lm -o /tmp/brooklyn-trace
+          node tests/reference_parity.js /tmp/brooklyn-trace
+          cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/brooklyn_render.c tests/brooklyn_render_test.c -lm -o /tmp/render-tests
+          /tmp/render-tests
