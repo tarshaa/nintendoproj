@@ -108,7 +108,7 @@ static void draw_game(void){
  text(frame,273-scroll,95,"DUCK",WHITE);
  int px=(int)game.x-scroll,py=(int)game.y,h=game.duck?8:18;
  rect(frame,px-6,py-h,12,h,RGB15(29,9,16));rect(frame,px+1,py-h+3,3,3,WHITE);
- const int loc[3]={110,330,535};for(int i=0;i<3;i++)if(!(game.collected&(1<<i)){
+ const int loc[3]={110,330,535};for(int i=0;i<3;i++)if(!(game.collected&(1<<i))){
  int x=loc[i]-scroll;rect(frame,x-2,117,5,13,RGB15(31,28,4));rect(frame,x-6,121,13,5,RGB15(31,28,4));}
  rect(frame,690-scroll,103,3,37,INK);rect(frame,693-scroll,103,16,12,RGB15(30,12,20));
  rect(frame,0,0,256,29,WHITE);int n=(game.collected&1)+((game.collected>>1)&1)+((game.collected>>2)&1);

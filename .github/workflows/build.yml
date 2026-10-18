@@ -5,7 +5,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: skylyrac/blocksds:slim-latest
+    container: skylyrac/blocksds@sha256:779f6193d1030c62e60d1f0f39c3e32cf4045c0bd224a45c0ceadf9d9ab01a51
     steps:
       - uses: actions/checkout@v4
       - name: Compile Nintendo DSi executable
@@ -15,3 +15,11 @@ jobs:
           name: photo-worlds-dsi
           path: photo-worlds.nds
           if-no-files-found: error
+  gameplay-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test movement, obstacles, failure and completion
+        run: |
+          cc -Wall -Wextra -Werror -fsanitize=address,undefined source/game.c tests/game_test.c -o /tmp/game-tests
+          /tmp/game-tests

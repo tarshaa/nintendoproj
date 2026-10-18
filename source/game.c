@@ -6,7 +6,8 @@ void game_reset(Game *g) { memset(g,0,sizeof(*g)); g->x=20; g->y=140; g->grounde
 void game_step(Game *g,int direction,bool jump,bool duck) {
  if(g->won||g->lost)return;
  if(++g->ticks>=90*60){g->lost=true;return;}
- g->duck=duck && g->grounded;
+ bool under_canopy=g->x+6>275 && g->x-6<315 && g->y>129;
+ g->duck=(duck || under_canopy) && g->grounded;
  float oldx=g->x, oldy=g->y;
  g->vx=direction*(g->duck?1.1f:2.0f);
  if(jump&&g->grounded&&!g->duck){g->vy=-5.8f;g->grounded=false;}
