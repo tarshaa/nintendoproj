@@ -1,0 +1,13 @@
+Working rules — user directed implementation before design polish, 2026-10-18
+
+Power-on destination eventually becomes our app. Exactly two primary home choices: Take a photo and Saved games. Camera/photo on top screen; game on bottom screen. Do not require Nintendo Camera navigation once our app is ready. Preserve TWiLight boot until the new app is tested.
+
+Games must use the semantics and relationships of photo elements, not merely recolour generic assets. The hardware prototype's palette mapping is temporary and must never be described as semantic generation. Preserve recognisable details of the original scene. Two meaningful elements are the target minimum; support extra detail without requiring one mandatory obstacle per object.
+
+Every short game immediately explains its purpose and objective. Controls must distinguish tap, hold and simultaneous input. Use clear visual feedback and only necessary text. Include progress, context-appropriate time/changing pressure, warnings before disruptive changes, recovery from failure, and a surprising sweet contextual reward.
+
+Genre goals: shooter means movement, aiming and shooting under pressure; adventure means motivated discovery with measurable progress; platformer includes move, jump and duck with readable obstacles. No universal water quest or fixed photo-specific scenario imposed on every game. Preserve levels for v1.
+
+Save source photo and sufficient game data for offline replay. Do not claim online generation works until photo upload and retrieval are tested on hardware. Keep API credentials on the server. No private NAND dumps, photos or credentials in GitHub.
+
+User designs visual moments later. Initial implementation may use plain UI. Hardware capability and actual playability take priority now.

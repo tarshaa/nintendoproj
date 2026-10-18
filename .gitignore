@@ -1,0 +1,9 @@
+build/
+*.nds
+*.dsi
+*.bin
+*.sha1
+*.HEIC
+*.jpg
+*.png
+.DS_Store

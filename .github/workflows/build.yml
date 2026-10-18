@@ -1,0 +1,17 @@
+name: Build DSi app
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: skylyrac/blocksds:slim-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Nintendo DSi executable
+        run: make -j2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photo-worlds-dsi
+          path: photo-worlds.nds
+          if-no-files-found: error
