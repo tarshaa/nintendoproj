@@ -7,3 +7,5 @@ build/
 *.jpg
 *.png
 .DS_Store
+
+*.pwg

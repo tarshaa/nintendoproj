@@ -2,11 +2,11 @@
 
 First native milestone for the photo-to-game project. This build is deliberately plain.
 
-- Home: Take a photo / Saved games (D-pad and A, or touch).
+- Home: Capture game / View saved games (D-pad and A, or touch).
 - Top screen: live DSi camera; A/L/R captures a 256×192 preview. Y switches camera; B returns.
 - Review: A saves the photo and starts a short platformer. B retakes.
 - Game: left/right move, A jumps, hold B to duck; START pauses. Collect three stars and reach the flag before 90 seconds. Falls return to a checkpoint. Winning reveals a small flower garden.
-- Saved games: left/right browse; A replays the selected world. Photos and checksums are stored in `sd:/photo-worlds/` using numbered `.pwg` files. Restarting the app preserves these files.
+- Saved games: calendar with dated entries; A replays the selected world. Photos and checksums are stored in `sd:/photo-worlds/` using numbered `.pwg` files. Restarting the app preserves these files.
 
 ## Honest scope
 
@@ -35,3 +35,10 @@ cc -Wall -Wextra -Werror source/game.c tests/game_test.c -o /tmp/photo-worlds-te
 2. Test DSi Wi-Fi and a hosted photo-processing service; no API secrets on SD.
 3. Replace palette-only mapping with validated semantic level data. Preserve meaningful photo relationships, clear controls, temporal pressure and a small contextual reward.
 4. Apply the visual design, extend the genre templates and configure direct startup after hardware verification.
+
+## Calendar and Brooklyn test world
+Saved games uses a monthly calendar. D-pad moves by day/week, L/R by month; A opens the selected game, X cycles games on the same date, B returns home. Touch a date to preview; touch it again to play. Dates with games have a dot. The original photo stays on the upper screen while the lower screen plays. New photos use the console date; old saves use file modification date. Set the DSi clock for meaningful dates.
+
+A private `sd:/photo-worlds/brooklyn.pwg` sidecar adds Brooklyn — Special Delivery, dated 2026-10-18. This hand-authored photo-specific world has a bag delivery, striped awning, AC updraft and seated recipient. Move with the D-pad, press A to jump, hold A to glide, B to duck, START to pause. Existing captured worlds keep the palette-based prototype. Automatic photo-to-level interpretation is not implemented.
+
+PWG files contain three little-endian uint32 values (magic, 49152 pixels, checksum), followed by 49152 RGB555 uint16 pixels and an optional YYYYMMDD uint32. Magic is 0x50574731 for camera worlds, 0x50574231 for the fixed Brooklyn world. Checksum is FNV-1a-style over uint16 values, not individual bytes. Old files without a date remain readable. The private source photo and generated sidecar are excluded from this public repository.

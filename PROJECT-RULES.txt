@@ -1,6 +1,6 @@
 Working rules — user directed implementation before design polish, 2026-10-18
 
-Power-on destination eventually becomes our app. Exactly two primary home choices: Take a photo and Saved games. Camera/photo on top screen; game on bottom screen. Do not require Nintendo Camera navigation once our app is ready. Preserve TWiLight boot until the new app is tested.
+Power-on destination eventually becomes our app. Exactly two primary home choices: Capture game and View saved games. Camera/photo on top screen; game on bottom screen. Do not require Nintendo Camera navigation once our app is ready. Preserve TWiLight boot until the new app is tested.
 
 Games must use the semantics and relationships of photo elements, not merely recolour generic assets. The hardware prototype's palette mapping is temporary and must never be described as semantic generation. Preserve recognisable details of the original scene. Two meaningful elements are the target minimum; support extra detail without requiring one mandatory obstacle per object.
 

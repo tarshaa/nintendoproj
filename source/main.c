@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "game.h"
+#include "brooklyn_render.h"
+#include "calendar.h"
+#include <time.h>
 #define W 256
 #define H 192
 #define PIXELS (W*H)
@@ -17,9 +20,14 @@ static u16 photo[PIXELS] __attribute__((aligned(32)));
 static u16 frame[PIXELS] __attribute__((aligned(32)));
 static bool storage, camera_ready,transfer,has_frame;
 static CameraDevice camera=CAMERA_OUTER;
-static int pending_camera,frame_wait,selection,save_id,ids[999],count,chosen;
+static int pending_camera,frame_wait,selection,save_id,ids[1000],count,chosen;
 static char message[64];
 static Game game;
+static Brooklyn brooklyn;
+static bool active_brooklyn;
+static Date dates[1000],selected_date;
+static unsigned today(void){time_t t=time(NULL);struct tm *d=localtime(&t);Date v={d?d->tm_year+1900:2026,d?d->tm_mon+1:10,d?d->tm_mday:18};if(!date_valid(v))v=(Date){2026,10,18};return date_pack(v);}
+static void reset_game(void){game_reset(&game);brooklyn_reset(&brooklyn);}
 typedef enum {HOME,CAMERA,REVIEW,LIBRARY,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN} State;
 static State state=HOME;
 static u16 sky=RGB15(12,22,31),grass=RGB15(12,25,8);
@@ -47,7 +55,7 @@ static void text(u16 *p,int x,int y,const char*s,u16 c){
 }
 static void title(const char*s){rect(frame,0,0,W,H,WHITE);text(frame,14,14,s,INK);}
 static void button(int y,const char*s,bool active){rect(frame,12,y,232,30,active?INK:RGB15(25,27,27));text(frame,22,y+11,s,active?WHITE:INK);}
-static void path_for(char *p,int id,const char*ext){snprintf(p,96,"sd:/photo-worlds/world-%03d.%s",id,ext);}
+static void path_for(char *p,int id,const char*ext){if(id==0)snprintf(p,96,"sd:/photo-worlds/brooklyn.%s",ext);else snprintf(p,96,"sd:/photo-worlds/world-%03d.%s",id,ext);}
 static unsigned checksum(const u16*p){unsigned h=2166136261u;for(int i=0;i<PIXELS;i++){h^=p[i];h*=16777619u;}return h;}
 static void palette(void){
  unsigned r=0,g=0,b=0,n=0;for(int i=0;i<PIXELS/2;i+=19){r+=photo[i]&31;g+=(photo[i]>>5)&31;b+=(photo[i]>>10)&31;n++;}
@@ -57,12 +65,33 @@ static void palette(void){
 }
 static bool load_world(int id){
  char p[96];path_for(p,id,"pwg");FILE*f=fopen(p,"rb");if(!f)return false;
- unsigned head[3];bool ok=fread(head,sizeof(head),1,f)==1&&head[0]==0x50574731&&head[1]==PIXELS;
+ unsigned head[3];bool ok=fread(head,sizeof(head),1,f)==1&&head[0]==(id==0?0x50574231u:0x50574731u)&&head[1]==PIXELS;
  if(ok)ok=fread(photo,sizeof(photo),1,f)==1;
  fclose(f);if(ok)ok=checksum(photo)==head[2];
- if(ok){save_id=id;palette();memcpy(top,photo,sizeof(photo));}return ok;
+ if(ok){active_brooklyn=id==0;save_id=id;palette();memcpy(top,photo,sizeof(photo));}return ok;
 }
-static void scan_worlds(void){count=0;if(!storage)return;for(int i=1;i<=999;i++){char p[96];struct stat st;path_for(p,i,"pwg");if(stat(p,&st)==0)ids[count++]=i;}}
+static void scan_worlds(void){
+ count=0;if(!storage)return;
+ for(int i=0;i<=999;i++){char p[96];struct stat st;path_for(p,i,"pwg");if(stat(p,&st)!=0)continue;
+ unsigned d=0;FILE*f=fopen(p,"rb");if(f){if(fseek(f,12+sizeof(photo),SEEK_SET)==0)fread(&d,4,1,f);fclose(f);}
+ Date day=date_unpack(d);if(!date_valid(day)){struct tm*t=localtime(&st.st_mtime);day=(Date){t?t->tm_year+1900:2026,t?t->tm_mon+1:10,t?t->tm_mday:18};if(!date_valid(day))day=date_unpack(today());}
+ ids[count]=i;dates[count++]=day;
+ }
+}
+static int day_count(Date d){int n=0;for(int i=0;i<count;i++)if(date_pack(dates[i])==date_pack(d))n++;return n;}
+static void calendar_preview(bool cycle){
+ int first=-1,next=-1;for(int i=0;i<count;i++)if(date_pack(dates[i])==date_pack(selected_date)){if(first<0)first=i;if(i>chosen&&next<0)next=i;}
+ chosen=cycle&&next>=0?next:first;message[0]=0;
+ if(chosen<0||!load_world(ids[chosen])){rect(top,0,0,W,H,INK);text(top,32,90,chosen<0?"NO GAMES ON THIS DATE":"PHOTO COULD NOT LOAD",WHITE);if(chosen>=0)strcpy(message,"FILE DAMAGED");}
+}
+static void open_calendar(void){scan_worlds();selected_date=date_unpack(today());if(count){selected_date=dates[0];for(int i=1;i<count;i++)if(date_pack(dates[i])>date_pack(selected_date))selected_date=dates[i];}chosen=-1;calendar_preview(false);state=LIBRARY;}
+static void draw_calendar(void){
+ title("SAVED GAMES");char line[40];snprintf(line,sizeof(line),"%04d-%02d",selected_date.year,selected_date.month);text(frame,180,14,line,INK);const char*week[]={"SU","MO","TU","WE","TH","FR","SA"};for(int i=0;i<7;i++)text(frame,13+i*35,33,week[i],INK);
+ int start=date_weekday((Date){selected_date.year,selected_date.month,1});
+ for(int d=1;d<=date_days(selected_date.year,selected_date.month);d++){int k=start+d-1,x=10+k%7*35,y=45+k/7*17;bool on=d==selected_date.day;rect(frame,x,y,32,15,on?INK:RGB15(27,28,27));snprintf(line,sizeof(line),"%d",d);text(frame,x+3,y+3,line,on?WHITE:INK);Date day={selected_date.year,selected_date.month,d};if(day_count(day))rect(frame,x+26,y+10,3,3,on?WHITE:RGB15(24,7,13));}
+ if(chosen>=0){snprintf(line,sizeof(line),ids[chosen]==0?"BROOKLYN - SPECIAL DELIVERY":"PHOTO WORLD %03d",ids[chosen]);text(frame,10,150,line,INK);}else text(frame,10,150,"NO GAMES ON THIS DATE",INK);
+ text(frame,10,163,"A PLAY  X NEXT GAME  B HOME",INK);text(frame,10,178,"PAD DATE  L R MONTH  TAP OPEN",INK);
+}
 static bool save_world(void){
  if(!storage){strcpy(message,"SD UNAVAILABLE - NOT SAVED");return false;}
  int id;for(id=1;id<=999;id++){char p[96];struct stat st;path_for(p,id,"pwg");if(stat(p,&st)!=0)break;}
@@ -71,10 +100,11 @@ static bool save_world(void){
  FILE*f=fopen(tmp,"wb");if(!f){strcpy(message,"CANNOT WRITE TO SD");return false;}
  unsigned head[3]={0x50574731,PIXELS,checksum(photo)};
  bool ok=fwrite(head,sizeof(head),1,f)==1&&fwrite(photo,sizeof(photo),1,f)==1;
+ unsigned date=today();if(ok)ok=fwrite(&date,4,1,f)==1;
  if(fclose(f)!=0)ok=false;
  if(ok)ok=rename(tmp,dest)==0;
  if(!ok){remove(tmp);strcpy(message,"SAVE FAILED - TRY AGAIN");return false;}
- save_id=id;strcpy(message,"SAVED ON SD");return true;
+ active_brooklyn=false;save_id=id;strcpy(message,"SAVED ON SD");return true;
 }
 static void stop_camera(void){
  if(!camera_ready)return;
@@ -119,13 +149,14 @@ static void draw_game(void){
 }
 static void render(void){
  switch(state){
- case HOME:title("PHOTO WORLDS - TEST BUILD");button(55,"TAKE A PHOTO",selection==0);button(100,"SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
+ case HOME:title("PHOTO WORLDS - TEST BUILD");button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
  case CAMERA:title("CAMERA");text(frame,14,55,"A OR L OR R - TAKE PHOTO",INK);text(frame,14,80,"Y - SWITCH CAMERA",INK);text(frame,14,105,"B - HOME",INK);text(frame,14,153,"PREVIEW CAPTURE 256 X 192",INK);break;
  case REVIEW:title("PHOTO READY");text(frame,12,45,"OFFLINE TEST: PHOTO COLOURS",INK);text(frame,12,61,"SHAPE THE LEVEL PALETTE",INK);text(frame,12,94,"A - SAVE AND PLAY",INK);text(frame,12,113,"B - RETAKE",INK);text(frame,12,150,message,INK);break;
- case LIBRARY:title("SAVED GAMES");if(count){char s[40];snprintf(s,sizeof(s),"WORLD %03d - %d OF %d",ids[chosen],chosen+1,count);text(frame,12,60,s,INK);text(frame,12,95,"LEFT RIGHT - BROWSE",INK);text(frame,12,115,"A - PLAY   B - HOME",INK);}else{text(frame,12,70,"NO SAVED GAMES YET",INK);text(frame,12,100,"B - HOME TO TAKE A PHOTO",INK);}text(frame,12,157,message,INK);break;
- case PLAY:draw_game();break;
+ case LIBRARY:draw_calendar();break;
+ case PLAY:
+ if(active_brooklyn){brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,28,WHITE);char line[40];snprintf(line,sizeof(line),"RETURN THE BAG   TIME %d",75-brooklyn.ticks/60);text(frame,7,4,line,INK);text(frame,7,16,brooklyn.weather_left<120?"GUST CHANGING SOON":brooklyn.wind==1?"TAILWIND":brooklyn.wind==2?"HEADWIND":"CALM",INK);rect(frame,0,177,256,15,WHITE);text(frame,2,181,"A JUMP-HOLD GLIDE  B DUCK  START",INK);}else draw_game();break;
  case PAUSE:title("PAUSED");text(frame,12,65,"START - RESUME",INK);text(frame,12,90,"A - RESTART",INK);text(frame,12,115,"B - HOME",INK);break;
- case WIN:title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
+ case WIN:if(active_brooklyn){brooklyn.ticks++;brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,31,WHITE);text(frame,44,9,"IT WAS FOR YOU",INK);rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);break;}title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
  case LOSE:title("TIME IS UP");text(frame,20,80,"YOUR WORLD IS STILL SAVED",INK);text(frame,20,115,"A RETRY  B HOME",INK);break;
  case ERROR_SCREEN:title("COULD NOT CONTINUE");text(frame,8,65,message,INK);text(frame,12,125,"B - HOME",INK);break;
  }
@@ -143,14 +174,19 @@ int main(void){
  case HOME:
  if(p&(KEY_UP|KEY_DOWN))selection^=1;
  if(p&KEY_TOUCH){touchPosition touch;touchRead(&touch);if(touch.px>=12&&touch.px<244){if(touch.py>=55&&touch.py<85){selection=0;p|=KEY_A;}if(touch.py>=100&&touch.py<130){selection=1;p|=KEY_A;}}}
- if(p&KEY_A){message[0]=0;if(!selection)start_camera();else{scan_worlds();chosen=count?count-1:0;state=LIBRARY;if(count&&!load_world(ids[chosen]))strcpy(message,"FILE DAMAGED - CHOOSE ANOTHER");}}break;
+ if(p&KEY_A){message[0]=0;if(!selection)start_camera();else open_calendar();}break;
  case CAMERA:camera_tick(p);break;
- case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){game_reset(&game);state=PLAY;}}break;
- case LIBRARY:
- if(p&KEY_B)state=HOME;else if(count){bool change=false;if(p&KEY_LEFT){chosen=(chosen+count-1)%count;change=true;}if(p&KEY_RIGHT){chosen=(chosen+1)%count;change=true;}if(change){message[0]=0;if(!load_world(ids[chosen]))strcpy(message,"FILE DAMAGED - CHOOSE ANOTHER");}if((p&KEY_A)&&load_world(ids[chosen])){game_reset(&game);state=PLAY;}}break;
- case PLAY:if(p&KEY_START)state=PAUSE;else{game_step(&game,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),p&KEY_A,held&KEY_B);if(game.won)state=WIN;if(game.lost)state=LOSE;}break;
- case PAUSE:if(p&KEY_START)state=PLAY;else if(p&KEY_A){game_reset(&game);state=PLAY;}else if(p&KEY_B)state=HOME;break;
- case WIN:case LOSE:if(p&KEY_A){game_reset(&game);state=PLAY;}else if(p&KEY_B)state=HOME;break;
+ case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){reset_game();state=PLAY;}}break;
+ case LIBRARY:{
+ bool moved=false;if(p&KEY_B){state=HOME;break;}
+ int delta=(!!(p&KEY_RIGHT)-!!(p&KEY_LEFT))+7*(!!(p&KEY_DOWN)-!!(p&KEY_UP));if(delta){selected_date=date_move(selected_date,delta);moved=true;}
+ int month=!!(p&KEY_R)-!!(p&KEY_L);if(month){selected_date=date_month(selected_date,month);moved=true;}
+ if(p&KEY_TOUCH){touchPosition t;touchRead(&t);if(t.px>=10&&t.px<255&&t.py>=45&&t.py<147){int d=(t.py-45)/17*7+(t.px-10)/35-date_weekday((Date){selected_date.year,selected_date.month,1})+1;if(d>0&&d<=date_days(selected_date.year,selected_date.month)){if(d==selected_date.day)p|=KEY_A;else{selected_date.day=d;moved=true;}}}}
+ if(moved)calendar_preview(false);else if(p&KEY_X)calendar_preview(true);
+ if((p&KEY_A)&&chosen>=0&&load_world(ids[chosen])){reset_game();state=PLAY;}break;}
+ case PLAY:if(p&KEY_START)state=PAUSE;else if(active_brooklyn){brooklyn_step(&brooklyn,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),p&KEY_A,held&KEY_B,held&KEY_A);if(brooklyn.won)state=WIN;if(brooklyn.lost)state=LOSE;}else{game_step(&game,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),p&KEY_A,held&KEY_B);if(game.won)state=WIN;if(game.lost)state=LOSE;}break;
+ case PAUSE:if(p&KEY_START)state=PLAY;else if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;
+ case WIN:case LOSE:if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;
  case ERROR_SCREEN:if(p&KEY_B)state=HOME;break;
  }
  render();
