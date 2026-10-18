@@ -1,0 +1,37 @@
+# Photo Worlds — DSi hardware prototype
+
+First native milestone for the photo-to-game project. This build is deliberately plain.
+
+- Home: Take a photo / Saved games (D-pad and A, or touch).
+- Top screen: live DSi camera; A/L/R captures a 256×192 preview. Y switches camera; B returns.
+- Review: A saves the photo and starts a short platformer. B retakes.
+- Game: left/right move, A jumps, hold B to duck; START pauses. Collect three stars and reach the flag before 90 seconds. Falls return to a checkpoint. Winning reveals a small flower garden.
+- Saved games: left/right browse; A replays the selected world. Photos and checksums are stored in `sd:/photo-worlds/` using numbered `.pwg` files. Restarting the app preserves these files.
+
+## Honest scope
+
+This is an offline hardware test, not the finished semantic photo-to-game generator. It samples colours from the photo for the level palette; the obstacle layout is fixed. No object recognition, network upload, generated artwork, or API calls are implemented. Photos stay on the SD card. Camera and touchscreen behavior require real DSi testing. Game logic has host tests, but a successful compile alone does not establish hardware compatibility.
+
+## Build
+
+Use BlocksDS (`make`) or the repository's **Build DSi app** GitHub Actions workflow. Download the `photo-worlds-dsi` artifact from a successful run and unzip it.
+
+## Install the test
+
+Copy `photo-worlds.nds` to the SD card alongside `BOOT.NDS`. Do NOT replace `BOOT.NDS` or change the existing startup settings yet. Open Photo Worlds from TWiLight Menu++. If it reports DS mode, launch `photo-worlds.nds` directly from Unlaunch (hold A+B at power-on). Test the camera, capture, save, complete a level, then power off/on and replay from Saved games. Only after this passes should the app become the automatic startup target.
+
+On a save failure the photo remains in memory on the review screen for retry. Up to 999 worlds are supported. Corrupt or truncated saves are rejected. Temporary incomplete saves are excluded from the gallery.
+
+## Local tests
+
+```
+cc -Wall -Wextra -Werror source/game.c tests/game_test.c -o /tmp/photo-worlds-tests
+/tmp/photo-worlds-tests
+```
+
+## Next milestones
+
+1. Confirm camera capture and save/replay on Tarshaa's DSi.
+2. Test DSi Wi-Fi and a hosted photo-processing service; no API secrets on SD.
+3. Replace palette-only mapping with validated semantic level data. Preserve meaningful photo relationships, clear controls, temporal pressure and a small contextual reward.
+4. Apply the visual design, extend the genre templates and configure direct startup after hardware verification.
