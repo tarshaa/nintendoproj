@@ -92,7 +92,7 @@ static void start_camera(void){
 }
 static void camera_tick(int pressed){
  pending_camera |= pressed & (KEY_A|KEY_L|KEY_R|KEY_Y);
- if(transfer && !ndmaBusy(CHANNEL)&&!cameraTransferActive()){transfer=false;has_frame=true;frame_wait=0;}
+ if(transfer && !ndmaBusy(CHANNEL)){cameraStopTransfer();transfer=false;has_frame=true;frame_wait=0;}
  if(pressed&KEY_B){stop_camera();state=HOME;return;}
  if(transfer){if(++frame_wait>180){stop_camera();strcpy(message,"CAMERA TIMEOUT - B TO RETURN");state=ERROR_SCREEN;}return;}
  pressed |= pending_camera; pending_camera=0;
