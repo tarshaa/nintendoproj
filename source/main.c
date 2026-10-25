@@ -9,6 +9,10 @@
 #include "input_queue.h"
 #include "brooklyn_render.h"
 #include "calendar.h"
+#include "generated_world.h"
+#ifdef PHOTO_NETWORK
+#include "photo_network.h"
+#endif
 #include <time.h>
 #define W 256
 #define H 192
@@ -30,10 +34,13 @@ static void clear_inputs(void){int irq=enterCriticalSection();inputs.start=input
 static Game game;
 static Brooklyn brooklyn;
 static bool active_brooklyn;
+static bool active_generated;
+static GeneratedWorld generated;
+static WorldPlayer generated_player;
 static Date dates[1000],selected_date;
 static unsigned today(void){time_t t=time(NULL);struct tm *d=localtime(&t);Date v={d?d->tm_year+1900:2026,d?d->tm_mon+1:10,d?d->tm_mday:18};if(!date_valid(v))v=(Date){2026,10,18};return date_pack(v);}
-static void reset_game(void){clear_inputs();game_reset(&game);brooklyn_reset(&brooklyn);}
-typedef enum {HOME,CAMERA,REVIEW,LIBRARY,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN} State;
+static void reset_game(void){clear_inputs();game_reset(&game);brooklyn_reset(&brooklyn);if(active_generated)world_reset(&generated_player,&generated);}
+typedef enum {HOME,CAMERA,REVIEW,LIBRARY,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN,GENERATE,GENERATION_ERROR} State;
 static State state=HOME;
 static u16 sky=RGB15(12,22,31),grass=RGB15(12,25,8);
 static const unsigned char glyphs[][7]={
@@ -51,7 +58,7 @@ static void rect(u16 *p,int x,int y,int w,int h,u16 c){
  for(int yy=y<0?0:y;yy<y+h&&yy<H;yy++)for(int xx=x<0?0:x;xx<x+w&&xx<W;xx++)p[yy*W+xx]=c|BIT(15);
 }
 static void text(u16 *p,int x,int y,const char*s,u16 c){
- for(;*s;s++,x+=6){int n=*s>='A'&&*s<='Z'?*s-'A':*s>='0'&&*s<='9'?26+*s-'0':-1;
+ for(;*s;s++,x+=6){char ch=*s>='a'&&*s<='z'?*s-'a'+'A':*s;int n=ch>='A'&&ch<='Z'?ch-'A':ch>='0'&&ch<='9'?26+ch-'0':-1;
  if(n>=0)for(int j=0;j<7;j++)for(int i=0;i<5;i++)if(glyphs[n][j]&(16>>i))rect(p,x+i,y+j,1,1,c);
 
  if(*s=='-')rect(p,x+1,y+3,3,1,c);
@@ -62,6 +69,20 @@ static void title(const char*s){rect(frame,0,0,W,H,WHITE);text(frame,14,14,s,INK
 static void button(int y,const char*s,bool active){rect(frame,12,y,232,30,active?INK:RGB15(25,27,27));text(frame,22,y+11,s,active?WHITE:INK);}
 static void path_for(char *p,int id,const char*ext){if(id==0)snprintf(p,96,"sd:/photo-worlds/brooklyn.%s",ext);else snprintf(p,96,"sd:/photo-worlds/world-%03d.%s",id,ext);}
 static unsigned checksum(const u16*p){unsigned h=2166136261u;for(int i=0;i<PIXELS;i++){h^=p[i];h*=16777619u;}return h;}
+static bool load_generated(int id){
+ char path[96];path_for(path,id,"pwl");FILE*f=fopen(path,"rb");if(!f){active_generated=false;return true;}
+ unsigned char data[4096];size_t n=fread(data,1,sizeof(data),f);bool complete=feof(f);fclose(f);
+ active_generated=complete&&world_parse(&generated,data,n,checksum(photo));return active_generated;
+}
+#ifdef PHOTO_NETWORK
+static void begin_generation(void){char path[96];path_for(path,save_id,"pwg");clear_inputs();state=photo_network_begin(path)?GENERATE:GENERATION_ERROR;}
+static bool save_generated(void){
+ size_t n;const unsigned char*data=photo_network_result(&n);if(!world_parse(&generated,data,n,checksum(photo)))return false;
+ char dest[96],temp[96];path_for(dest,save_id,"pwl");path_for(temp,save_id,"part");FILE*f=fopen(temp,"wb");if(!f)return false;
+ bool ok=fwrite(data,1,n,f)==n;if(fclose(f)!=0)ok=false;if(ok)ok=rename(temp,dest)==0;if(!ok)remove(temp);
+ if(ok){active_generated=true;active_brooklyn=false;}return ok;
+}
+#endif
 static void palette(void){
  unsigned r=0,g=0,b=0,n=0;for(int i=0;i<PIXELS/2;i+=19){r+=photo[i]&31;g+=(photo[i]>>5)&31;b+=(photo[i]>>10)&31;n++;}
  sky=RGB15(8+r/n*2/3,8+g/n*2/3,8+b/n*2/3);
@@ -73,7 +94,7 @@ static bool load_world(int id){
  unsigned head[3];bool ok=fread(head,sizeof(head),1,f)==1&&head[0]==(id==0?0x50574231u:0x50574731u)&&head[1]==PIXELS;
  if(ok)ok=fread(photo,sizeof(photo),1,f)==1;
  fclose(f);if(ok)ok=checksum(photo)==head[2];
- if(ok){active_brooklyn=id==0;save_id=id;palette();memcpy(top,photo,sizeof(photo));}return ok;
+ if(ok){active_brooklyn=id==0;save_id=id;palette();memcpy(top,photo,sizeof(photo));active_generated=false;if(id>0)ok=load_generated(id);}return ok;
 }
 static void scan_worlds(void){
  count=0;if(!storage)return;
@@ -109,7 +130,7 @@ static bool save_world(void){
  if(fclose(f)!=0)ok=false;
  if(ok)ok=rename(tmp,dest)==0;
  if(!ok){remove(tmp);strcpy(message,"SAVE FAILED - TRY AGAIN");return false;}
- active_brooklyn=false;save_id=id;strcpy(message,"SAVED ON SD");return true;
+ active_brooklyn=false;active_generated=false;save_id=id;strcpy(message,"SAVED ON SD");return true;
 }
 static void stop_camera(void){
  if(!camera_ready)return;
@@ -156,14 +177,28 @@ static void render(void){
  switch(state){
  case HOME:title("PHOTO WORLDS - TEST BUILD");button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
  case CAMERA:title("CAMERA");text(frame,14,55,"A OR L OR R - TAKE PHOTO",INK);text(frame,14,80,"Y - SWITCH CAMERA",INK);text(frame,14,105,"B - HOME",INK);text(frame,14,153,"PREVIEW CAPTURE 256 X 192",INK);break;
- case REVIEW:title("PHOTO READY");text(frame,12,45,"OFFLINE TEST: PHOTO COLOURS",INK);text(frame,12,61,"SHAPE THE LEVEL PALETTE",INK);text(frame,12,94,"A - SAVE AND PLAY",INK);text(frame,12,113,"B - RETAKE",INK);text(frame,12,150,message,INK);break;
+ case REVIEW:title("PHOTO READY");
+#ifdef PHOTO_NETWORK
+ text(frame,12,45,"MAKE A GAME FROM THIS PHOTO",INK);text(frame,12,61,"USES YOUR PAIRED PHOTO SERVICE",INK);text(frame,12,94,"A - SAVE AND GENERATE",INK);
+#else
+ text(frame,12,45,"OFFLINE TEST: PHOTO COLOURS",INK);text(frame,12,61,"SHAPE THE LEVEL PALETTE",INK);text(frame,12,94,"A - SAVE AND PLAY",INK);
+#endif
+ text(frame,12,113,"B - RETAKE",INK);text(frame,12,150,message,INK);break;
  case LIBRARY:draw_calendar();break;
  case PLAY:
+ if(active_generated){world_render(frame,&generated,&generated_player);rect(frame,0,0,256,27,WHITE);char line[42];snprintf(line,sizeof(line),"%.40s",generated.objective);text(frame,5,4,line,INK);snprintf(line,sizeof(line),"%.40s",strlen(generated.objective)>40?generated.objective+40:"");text(frame,5,15,line,INK);rect(frame,0,177,256,15,WHITE);text(frame,4,181,"PAD MOVE A JUMP HOLD A HIGH B SLOW",INK);break;}
  if(active_brooklyn){brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,28,WHITE);char line[40];snprintf(line,sizeof(line),"RETURN THE BAG    FLAGS %d OF 3",brooklyn.checkpoint);text(frame,7,4,line,INK);text(frame,7,16,brooklyn.weather_left<3?"GUST CHANGING SOON":brooklyn.wind==1?"TAILWIND":brooklyn.wind==2?"CROSSWIND - STEER LEFT":"CALM",INK);rect(frame,0,166,256,26,WHITE);text(frame,3,170,brooklyn.z<11?"UP FORWARD  LEFT RIGHT STEER":brooklyn.z<18?"HOLD UP - TAP A BEFORE GAP":brooklyn.z<30?"HOLD B AND UP TO DUCK UNDER":brooklyn.z<46?"HOLD UP AND A TO GLIDE":brooklyn.z<54?"LAST GAP - HOLD UP AND A":"RETURN BAG TO THE PERSON",INK);text(frame,3,182,"A JUMP-HOLD GLIDE B DUCK START PAUSE",INK);}else draw_game();break;
  case PAUSE:title("PAUSED");text(frame,12,65,"START - RESUME",INK);text(frame,12,90,"A - RESTART",INK);text(frame,12,115,"B - HOME",INK);break;
- case WIN:if(active_brooklyn){brooklyn.reward+=render_ticks/60.f;brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,31,WHITE);text(frame,44,9,brooklyn.reward>4?"IT WAS FOR YOU":"DELIVERED",INK);rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);break;}title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
+ case WIN:if(active_generated){for(unsigned i=0;i<render_ticks;i++)world_step(&generated_player,&generated,0,0,false,false);world_render(frame,&generated,&generated_player);if(generated_player.reward>4){rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);}break;}if(active_brooklyn){brooklyn.reward+=render_ticks/60.f;brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,31,WHITE);text(frame,44,9,brooklyn.reward>4?"IT WAS FOR YOU":"DELIVERED",INK);rect(frame,0,175,256,17,WHITE);text(frame,35,181,"A REPLAY  B HOME",INK);break;}title("YOU BROUGHT THEM HOME");for(int i=0;i<3;i++){int x=83+i*40;rect(frame,x,90,2,35,grass);rect(frame,x-6,80,14,14,RGB15(30,12+i*4,20));rect(frame,x-2,84,6,6,RGB15(31,27,4));}text(frame,40,143,"A LITTLE GARDEN FOR YOU",INK);text(frame,20,171,"A REPLAY  B HOME",INK);break;
  case LOSE:title("TIME IS UP");text(frame,20,80,"YOUR WORLD IS STILL SAVED",INK);text(frame,20,115,"A RETRY  B HOME",INK);break;
  case ERROR_SCREEN:title("COULD NOT CONTINUE");text(frame,8,65,message,INK);text(frame,12,125,"B - HOME",INK);break;
+ case GENERATE:case GENERATION_ERROR:
+#ifdef PHOTO_NETWORK
+ title(state==GENERATE?"MAKING YOUR GAME":"PHOTO IS SAFE");
+ {char line[41];const char*s=photo_network_message();for(int i=0;i<4;i++){size_t offset=(size_t)i*40;if(offset>=strlen(s))break;snprintf(line,sizeof(line),"%.40s",s+offset);text(frame,6,55+i*12,line,INK);}}
+ text(frame,8,139,state==GENERATE?"B - CANCEL AND KEEP PHOTO":"A - RETRY  B - HOME",INK);
+#endif
+ break;
  }
  memcpy(bottom,frame,sizeof(frame));
 }
@@ -183,20 +218,44 @@ int main(void){
  if(p&KEY_TOUCH){touchPosition touch;touchRead(&touch);if(touch.px>=12&&touch.px<244){if(touch.py>=55&&touch.py<85){selection=0;p|=KEY_A;}if(touch.py>=100&&touch.py<130){selection=1;p|=KEY_A;}}}
  if(p&KEY_A){message[0]=0;if(!selection)start_camera();else open_calendar();}break;
  case CAMERA:camera_tick(p);break;
- case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){reset_game();state=PLAY;}}break;
+ case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){
+#ifdef PHOTO_NETWORK
+ begin_generation();
+#else
+ reset_game();state=PLAY;
+#endif
+ }}break;
+ case GENERATE:
+#ifdef PHOTO_NETWORK
+ photo_network_tick(p&KEY_B);
+ if(photo_network_stage()==NET_READY){if(save_generated()){reset_game();state=PLAY;}else{strcpy(message,"GENERATED GAME INVALID OR SD FULL");state=ERROR_SCREEN;}}
+ else if(photo_network_stage()==NET_FAILED)state=GENERATION_ERROR;
+ else if(photo_network_stage()==NET_CANCELLED)state=HOME;
+#endif
+ break;
+ case GENERATION_ERROR:
+#ifdef PHOTO_NETWORK
+ if(p&KEY_A)begin_generation();else if(p&KEY_B)state=HOME;
+#endif
+ break;
  case LIBRARY:{
  bool moved=false;if(p&KEY_B){state=HOME;break;}
  int delta=(!!(p&KEY_RIGHT)-!!(p&KEY_LEFT))+7*(!!(p&KEY_DOWN)-!!(p&KEY_UP));if(delta){selected_date=date_move(selected_date,delta);moved=true;}
  int month=!!(p&KEY_R)-!!(p&KEY_L);if(month){selected_date=date_month(selected_date,month);moved=true;}
  if(p&KEY_TOUCH){touchPosition t;touchRead(&t);if(t.px>=10&&t.px<255&&t.py>=45&&t.py<147){int d=(t.py-45)/17*7+(t.px-10)/35-date_weekday((Date){selected_date.year,selected_date.month,1})+1;if(d>0&&d<=date_days(selected_date.year,selected_date.month)){if(d==selected_date.day)p|=KEY_A;else{selected_date.day=d;moved=true;}}}}
  if(moved)calendar_preview(false);else if(p&KEY_X)calendar_preview(true);
- if((p&KEY_A)&&chosen>=0&&load_world(ids[chosen])){reset_game();state=PLAY;}break;}
+ if((p&KEY_A)&&chosen>=0&&load_world(ids[chosen])){
+#ifdef PHOTO_NETWORK
+ if(!active_brooklyn&&!active_generated)begin_generation();else
+#endif
+ {reset_game();state=PLAY;}}break;}
  case PLAY:
  // Replay every display-tick input in order, even if drawing skipped frames.
  for(unsigned i=0;i<n&&state==PLAY;i++){
  int edge=samples[i].pressed,held=samples[i].held;
  if(edge&KEY_START){state=PAUSE;clear_inputs();break;}
- if(active_brooklyn){brooklyn_step(&brooklyn,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),!!(held&KEY_UP)-!!(held&KEY_DOWN),edge&KEY_A,held&KEY_B,held&KEY_A);if(brooklyn.won)state=WIN;if(brooklyn.lost)state=LOSE;}
+ if(active_generated){world_step(&generated_player,&generated,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),!!(held&KEY_UP)-!!(held&KEY_DOWN),held&KEY_A,held&KEY_B);if(generated_player.won)state=WIN;}
+ else if(active_brooklyn){brooklyn_step(&brooklyn,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),!!(held&KEY_UP)-!!(held&KEY_DOWN),edge&KEY_A,held&KEY_B,held&KEY_A);if(brooklyn.won)state=WIN;if(brooklyn.lost)state=LOSE;}
  else{game_step(&game,!!(held&KEY_RIGHT)-!!(held&KEY_LEFT),edge&KEY_A,held&KEY_B);if(game.won)state=WIN;if(game.lost)state=LOSE;}
  }break;
  case PAUSE:if(p&KEY_START){clear_inputs();state=PLAY;}else if(p&KEY_A){reset_game();state=PLAY;}else if(p&KEY_B)state=HOME;break;

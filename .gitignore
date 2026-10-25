@@ -9,3 +9,6 @@ build/
 .DS_Store
 
 *.pwg
+*.pwl
+network.cfg
+service-ca.pem

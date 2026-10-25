@@ -3,6 +3,26 @@ on: [push, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  network-build:
+    runs-on: ubuntu-latest
+    container: skylyrac/blocksds@sha256:779f6193d1030c62e60d1f0f39c3e32cf4045c0bd224a45c0ceadf9d9ab01a51
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install TLS and WiFi build dependencies
+        run: wf-pacman -Syu --noconfirm toolchain-gcc-arm-none-eabi-zlib blocksds-mbedtls blocksds-libcurl
+      - name: Build automatic photo-game test app
+        run: make -j2 PHOTO_NETWORK=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photo-worlds-online
+          path: photo-worlds-online.nds
+          if-no-files-found: error
+  generation-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test upload, package, native routes and explicit failures
+        run: python3 -m unittest discover -s service -p test_service.py -v
   build:
     runs-on: ubuntu-latest
     container: skylyrac/blocksds@sha256:779f6193d1030c62e60d1f0f39c3e32cf4045c0bd224a45c0ceadf9d9ab01a51
