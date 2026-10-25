@@ -20,6 +20,7 @@ def verify(package):
                                  str(sources[0]), str(sources[2]), str(sources[3]), "-lm", "-o", str(binary)],
                                 capture_output=True, timeout=30)
         if result.returncode:
+            (folder / "compile-error.log").write_bytes(result.stderr)
             raise ValueError("Native route validator unavailable on the server")
     with tempfile.NamedTemporaryFile(dir=folder, suffix=".pwl") as f:
         f.write(package);f.flush()

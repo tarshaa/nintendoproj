@@ -22,7 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Test upload, package, native routes and explicit failures
-        run: python3 -m unittest discover -s service -p test_service.py -v
+        run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror source/generated_world.c source/generated_render.c tests/generated_check.c -lm -o /tmp/generated-check
+          python3 -m unittest discover -s service -p test_service.py -v
   build:
     runs-on: ubuntu-latest
     container: skylyrac/blocksds@sha256:779f6193d1030c62e60d1f0f39c3e32cf4045c0bd224a45c0ceadf9d9ab01a51

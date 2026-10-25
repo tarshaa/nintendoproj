@@ -8,8 +8,10 @@ static bool edge(const GeneratedWorld*w,unsigned a,unsigned b){WorldPlayer p;wor
  for(int i=0;i<240;i++){const WorldNode*t=&w->nodes[b];float dx=t->x-p.x,dz=t->z-p.z,d=hypotf(dx,dz);world_step(&p,w,d>.08f?dx/d:0,d>.08f?dz/d:0,true,false);if(p.ground<0)air=true;if(p.falls)return false;if(air&&p.ground>=0)return (unsigned)p.ground==b;}return false;}
 static unsigned reach(bool edges[WORLD_MAX_NODES][WORLD_MAX_NODES],unsigned count,unsigned start,int omit,unsigned goal){bool seen[WORLD_MAX_NODES]={0};seen[start]=true;for(unsigned pass=0;pass<count;pass++)for(unsigned i=0;i<count;i++)if(seen[i])for(unsigned j=0;j<count;j++)if(edges[i][j]&&(int)j!=omit)seen[j]=true;return seen[goal];}
 int main(int argc,char**argv){
- if(argc<2)return 2;FILE*f=fopen(argv[1],"rb");if(!f)return 2;unsigned char data[4096];size_t n=fread(data,1,sizeof(data),f);fclose(f);
- if(n<16)return 2;uint32_t checksum=(uint32_t)data[12]|((uint32_t)data[13]<<8)|((uint32_t)data[14]<<16)|((uint32_t)data[15]<<24);
+ if(argc<2)return 2;
+ FILE*f=fopen(argv[1],"rb");if(!f)return 2;unsigned char data[4096];size_t n=fread(data,1,sizeof(data),f);fclose(f);
+ if(n<16)return 2;
+ uint32_t checksum=(uint32_t)data[12]|((uint32_t)data[13]<<8)|((uint32_t)data[14]<<16)|((uint32_t)data[15]<<24);
  GeneratedWorld w;if(!world_parse(&w,data,n,checksum)){fprintf(stderr,"Package invalid\n");return 1;}
  bool edges[WORLD_MAX_NODES][WORLD_MAX_NODES]={0};for(unsigned i=0;i<w.count;i++)for(unsigned j=0;j<w.count;j++)if(i!=j)edges[i][j]=edge(&w,i,j);
  for(unsigned i=0;i<w.count;i++)if(!reach(edges,w.count,0,-1,i)||!reach(edges,w.count,i,-1,w.goal)){fprintf(stderr,"Runtime cannot traverse platform %u\n",i);return 1;}

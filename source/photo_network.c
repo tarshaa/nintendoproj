@@ -11,16 +11,16 @@ static NetStage stage;
 static CURLM *multi;static CURL *easy;static struct curl_slist *headers;
 static char base[240],token[80],url[320],job[33],message[160];
 static unsigned char response[4096],*upload;static size_t used,upload_size;
-static time_t began,next_poll;static bool wifi_started;
+static time_t began,next_poll;static bool wifi_started,curl_started;
 static const char probe[]="Photo Worlds encrypted round trip v1";
 static void cleanup_request(void){if(easy){if(multi)curl_multi_remove_handle(multi,easy);curl_easy_cleanup(easy);easy=NULL;}if(multi){curl_multi_cleanup(multi);multi=NULL;}curl_slist_free_all(headers);headers=NULL;}
-void photo_network_close(void){cleanup_request();free(upload);upload=NULL;upload_size=0;if(wifi_started){Wifi_DisconnectAP();Wifi_DisableWifi();wifi_started=false;}memset(token,0,sizeof(token));}
+void photo_network_close(void){cleanup_request();free(upload);upload=NULL;upload_size=0;if(wifi_started){Wifi_DisconnectAP();Wifi_DisableWifi();wifi_started=false;}if(curl_started){curl_global_cleanup();curl_started=false;}memset(token,0,sizeof(token));}
 static void fail(const char*s){snprintf(message,sizeof(message),"%s",s);stage=NET_FAILED;photo_network_close();}
 static size_t receive(char*data,size_t size,size_t n,void*arg){(void)arg;if(size&&n>sizeof(response)/size)return 0;size_t len=size*n;if(len>sizeof(response)-used-1)return 0;memcpy(response+used,data,len);used+=len;response[used]=0;return len;}
 static bool start_request(const char *path,const void*body,size_t size){
  cleanup_request();used=0;snprintf(url,sizeof(url),"%s%s",base,path);
  multi=curl_multi_init();easy=curl_easy_init();if(!multi||!easy){fail("Network memory unavailable");return false;}
- char authorization[100];snprintf(authorization,sizeof(authorization),"Authorization: Bearer %s",token);
+ char authorization[128];snprintf(authorization,sizeof(authorization),"Authorization: Bearer %s",token);
  headers=curl_slist_append(headers,authorization);headers=curl_slist_append(headers,"Content-Type: application/octet-stream");headers=curl_slist_append(headers,"Expect:");
  curl_easy_setopt(easy,CURLOPT_URL,url);curl_easy_setopt(easy,CURLOPT_HTTPHEADER,headers);
  curl_easy_setopt(easy,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
@@ -48,6 +48,7 @@ bool photo_network_begin(const char*path){
  bool ok=fread(upload,1,(size_t)size,f)==(size_t)size;fclose(f);upload_size=(size_t)size;if(!ok){fail("Could not read the saved photo");return false;}
  if(!isDSiMode()){fail("Start in DSi mode through Unlaunch");return false;}
  if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK){fail("TLS initialization failed");return false;}
+ curl_started=true;
  if(!Wifi_CheckInit()&&!Wifi_InitDefault(INIT_ONLY|WIFI_ATTEMPT_DSI_MODE)){fail("DSi WiFi initialization failed");return false;}
  wifi_started=true;Wifi_AutoConnect();began=time(NULL);stage=NET_CONNECT;strcpy(message,"Connecting to saved WiFi");return true;
 }
