@@ -56,7 +56,18 @@ void photo_network_tick(bool cancel){
  if(cancel){photo_network_close();stage=NET_CANCELLED;strcpy(message,"Cancelled; photo stays saved");return;}
  if(stage<NET_CONNECT||stage>NET_FETCH)return;
  time_t now=time(NULL);if(now-began>180){fail("Timed out; photo saved. A retries");return;}
- if(stage==NET_CONNECT){int status=Wifi_AssocStatus();if(status==ASSOCSTATUS_CANNOTCONNECT||now-began>35){fail("WiFi failed; check hotspot settings");return;}if(status!=ASSOCSTATUS_ASSOCIATED)return;
+ if(stage==NET_CONNECT){int status=Wifi_AssocStatus();
+  if(status==ASSOCSTATUS_CANNOTCONNECT){fail("WiFi could not join saved network");return;}
+  if(now-began>35){
+   if(status==ASSOCSTATUS_SEARCHING)fail("WiFi timeout finding saved hotspot");
+   else if(status==ASSOCSTATUS_ACQUIRINGDHCP)fail("WiFi joined; no network address yet");
+   else fail("WiFi timeout joining saved hotspot");
+   return;
+  }
+  if(status!=ASSOCSTATUS_ASSOCIATED){
+   const char*step=status==ASSOCSTATUS_SEARCHING?"Finding saved hotspot":status==ASSOCSTATUS_ACQUIRINGDHCP?"Getting network address":"Joining saved hotspot";
+   snprintf(message,sizeof(message),"%s - %ld seconds",step,(long)(now-began));return;
+  }
   stage=NET_PROBE;strcpy(message,"Checking encrypted connection");start_request("/v1/probe",probe,sizeof(probe)-1);return;}
  if(stage==NET_WAIT){if(now<next_poll)return;char path[64];snprintf(path,sizeof(path),"/v1/jobs/%s",job);stage=NET_FETCH;start_request(path,NULL,0);return;}
  int running=0;if(curl_multi_perform(multi,&running)!=CURLM_OK){fail("Transfer interrupted; A retries");return;}

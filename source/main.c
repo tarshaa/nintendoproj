@@ -20,6 +20,15 @@
 #define CHANNEL 1
 #define INK RGB15(3,4,7)
 #define WHITE RGB15(31,31,29)
+static void wait_frame(void){
+#ifdef PHOTO_NETWORK
+ // DSWiFi/lwIP needs cooperative CPU time for received packets and DHCP.
+ // A BIOS VBlank wait alone starves those tasks, including during retries.
+ cothread_yield_irq(IRQ_VBLANK);
+#else
+ swiWaitForVBlank();
+#endif
+}
 static u16 *top,*bottom;
 static u16 photo[PIXELS] __attribute__((aligned(32)));
 static u16 frame[PIXELS] __attribute__((aligned(32)));
@@ -135,7 +144,7 @@ static bool save_world(void){
 static void stop_camera(void){
  if(!camera_ready)return;
  // Do not wait forever on a failed camera transfer.
- for(int i=0;i<120&&ndmaBusy(CHANNEL);i++)swiWaitForVBlank();
+ for(int i=0;i<120&&ndmaBusy(CHANNEL);i++)wait_frame();
  cameraStopTransfer();REG_NDMA_CR(CHANNEL)=0;cameraDeinit();camera_ready=false;transfer=false;
 }
 static void start_camera(void){
@@ -175,7 +184,13 @@ static void draw_game(void){
 }
 static void render(void){
  switch(state){
- case HOME:title("PHOTO WORLDS - TEST BUILD");button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
+ case HOME:
+#ifdef PHOTO_NETWORK
+ title("PHOTO WORLDS ONLINE");
+#else
+ title("PHOTO WORLDS - TEST BUILD");
+#endif
+ button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
  case CAMERA:title("CAMERA");text(frame,14,55,"A OR L OR R - TAKE PHOTO",INK);text(frame,14,80,"Y - SWITCH CAMERA",INK);text(frame,14,105,"B - HOME",INK);text(frame,14,153,"PREVIEW CAPTURE 256 X 192",INK);break;
  case REVIEW:title("PHOTO READY");
 #ifdef PHOTO_NETWORK
@@ -210,7 +225,7 @@ int main(void){
  top=bgGetGfxPtr(t);bottom=bgGetGfxPtr(b);rect(top,0,0,W,H,RGB15(16,23,29));text(top,65,88,"PHOTO WORLDS",WHITE);
  storage=fatInitDefault();if(storage){struct stat st;if(stat("sd:/photo-worlds",&st)!=0)storage=mkdir("sd:/photo-worlds",0777)==0;else storage=S_ISDIR(st.st_mode);}
  irqSet(IRQ_VBLANK,sample_input);irqEnable(IRQ_VBLANK);
- while(1){swiWaitForVBlank();InputSample samples[INPUT_CAPACITY];int irq=enterCriticalSection();unsigned n=input_drain(&inputs,samples);leaveCriticalSection(irq);
+ while(1){wait_frame();InputSample samples[INPUT_CAPACITY];int irq=enterCriticalSection();unsigned n=input_drain(&inputs,samples);leaveCriticalSection(irq);
  int p=0;for(unsigned i=0;i<n;i++)p|=samples[i].pressed;render_ticks=n;
  switch(state){
  case HOME:

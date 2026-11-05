@@ -6,6 +6,7 @@ GAME_AUTHOR := Tarshaa
 ifeq ($(PHOTO_NETWORK),1)
 BLOCKSDSEXT ?= /opt/blocksds/external
 NAME := photo-worlds-online
+GAME_TITLE := Photo Worlds Online
 GAME_SUBTITLE := Automatic photo game test
 ARM7ELF := $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi_maxmod.elf
 CFLAGS += -DPHOTO_NETWORK
