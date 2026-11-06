@@ -35,6 +35,7 @@ static u16 frame[PIXELS] __attribute__((aligned(32)));
 static bool storage, camera_ready,transfer,has_frame;
 static CameraDevice camera=CAMERA_OUTER;
 static int pending_camera,frame_wait,selection,save_id,ids[1000],count,chosen;
+static bool packages[1000],library_photos;
 static char message[64];
 static InputQueue inputs;
 static unsigned render_ticks=1;
@@ -49,7 +50,7 @@ static WorldPlayer generated_player;
 static Date dates[1000],selected_date;
 static unsigned today(void){time_t t=time(NULL);struct tm *d=localtime(&t);Date v={d?d->tm_year+1900:2026,d?d->tm_mon+1:10,d?d->tm_mday:18};if(!date_valid(v))v=(Date){2026,10,18};return date_pack(v);}
 static void reset_game(void){clear_inputs();game_reset(&game);brooklyn_reset(&brooklyn);if(active_generated)world_reset(&generated_player,&generated);}
-typedef enum {HOME,CAMERA,REVIEW,LIBRARY,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN,GENERATE,GENERATION_ERROR} State;
+typedef enum {HOME,CAMERA,REVIEW,LIBRARY,SAVED_PHOTO,SAVED_ERROR,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN,GENERATE,GENERATION_ERROR} State;
 static State state=HOME;
 static u16 sky=RGB15(12,22,31),grass=RGB15(12,25,8);
 static const unsigned char glyphs[][7]={
@@ -110,22 +111,39 @@ static void scan_worlds(void){
  for(int i=0;i<=999;i++){char p[96];struct stat st;path_for(p,i,"pwg");if(stat(p,&st)!=0)continue;
  unsigned d=0;FILE*f=fopen(p,"rb");if(f){if(fseek(f,12+sizeof(photo),SEEK_SET)==0)fread(&d,4,1,f);fclose(f);}
  Date day=date_unpack(d);if(!date_valid(day)){struct tm*t=localtime(&st.st_mtime);day=(Date){t?t->tm_year+1900:2026,t?t->tm_mon+1:10,t?t->tm_mday:18};if(!date_valid(day))day=date_unpack(today());}
- ids[count]=i;dates[count++]=day;
+ ids[count]=i;dates[count]=day;
+ path_for(p,i,"pwl");packages[count]=i==0||stat(p,&st)==0;
+ count++;
  }
 }
-static int day_count(Date d){int n=0;for(int i=0;i<count;i++)if(date_pack(dates[i])==date_pack(d))n++;return n;}
-static void calendar_preview(bool cycle){
- int first=-1,next=-1;for(int i=0;i<count;i++)if(date_pack(dates[i])==date_pack(selected_date)){if(first<0)first=i;if(i>chosen&&next<0)next=i;}
- chosen=cycle&&next>=0?next:first;message[0]=0;
- if(chosen<0||!load_world(ids[chosen])){rect(top,0,0,W,H,INK);text(top,32,90,chosen<0?"NO GAMES ON THIS DATE":"PHOTO COULD NOT LOAD",WHITE);if(chosen>=0)strcpy(message,"FILE DAMAGED");}
+static bool library_item(int i){
+#ifdef PHOTO_NETWORK
+ return library_photos?!packages[i]:packages[i];
+#else
+ (void)i;return true;
+#endif
 }
-static void open_calendar(void){scan_worlds();selected_date=date_unpack(today());if(count){selected_date=dates[0];for(int i=1;i<count;i++)if(date_pack(dates[i])>date_pack(selected_date))selected_date=dates[i];}chosen=-1;calendar_preview(false);state=LIBRARY;}
+static int day_count(Date d){int n=0;for(int i=0;i<count;i++)if(library_item(i)&&date_pack(dates[i])==date_pack(d))n++;return n;}
+static void calendar_preview(bool cycle){
+ int first=-1,next=-1;for(int i=0;i<count;i++)if(library_item(i)&&date_pack(dates[i])==date_pack(selected_date)){if(first<0)first=i;if(i>chosen&&next<0)next=i;}
+ chosen=cycle&&next>=0?next:first;message[0]=0;
+ if(chosen<0||!load_world(ids[chosen])){rect(top,0,0,W,H,INK);text(top,20,90,chosen<0?(library_photos?"NO PHOTOS ON THIS DATE":"NO GAMES ON THIS DATE"):"SAVED FILE COULD NOT LOAD",WHITE);if(chosen>=0)strcpy(message,"FILE DAMAGED");}
+}
+static void open_calendar(void){
+ scan_worlds();selected_date=date_unpack(today());bool found=false;
+ for(int i=0;i<count;i++)if(library_item(i)&&(!found||date_pack(dates[i])>date_pack(selected_date))){selected_date=dates[i];found=true;}
+ chosen=-1;calendar_preview(false);clear_inputs();state=LIBRARY;
+}
 static void draw_calendar(void){
- title("SAVED GAMES");char line[40];snprintf(line,sizeof(line),"%04d-%02d",selected_date.year,selected_date.month);text(frame,180,14,line,INK);const char*week[]={"SU","MO","TU","WE","TH","FR","SA"};for(int i=0;i<7;i++)text(frame,13+i*35,33,week[i],INK);
+ title(library_photos?"SAVED PHOTOS":"SAVED GAMES");char line[40];snprintf(line,sizeof(line),"%04d-%02d",selected_date.year,selected_date.month);text(frame,180,14,line,INK);const char*week[]={"SU","MO","TU","WE","TH","FR","SA"};for(int i=0;i<7;i++)text(frame,13+i*35,33,week[i],INK);
  int start=date_weekday((Date){selected_date.year,selected_date.month,1});
  for(int d=1;d<=date_days(selected_date.year,selected_date.month);d++){int k=start+d-1,x=10+k%7*35,y=45+k/7*17;bool on=d==selected_date.day;rect(frame,x,y,32,15,on?INK:RGB15(27,28,27));snprintf(line,sizeof(line),"%d",d);text(frame,x+3,y+3,line,on?WHITE:INK);Date day={selected_date.year,selected_date.month,d};if(day_count(day))rect(frame,x+26,y+10,3,3,on?WHITE:RGB15(24,7,13));}
- if(chosen>=0){snprintf(line,sizeof(line),ids[chosen]==0?"BROOKLYN - SPECIAL DELIVERY":"PHOTO WORLD %03d",ids[chosen]);text(frame,10,150,line,INK);}else text(frame,10,150,"NO GAMES ON THIS DATE",INK);
- text(frame,10,163,"A PLAY  X NEXT GAME  B HOME",INK);text(frame,10,178,"PAD DATE  L R MONTH  TAP OPEN",INK);
+ if(chosen>=0){snprintf(line,sizeof(line),ids[chosen]==0?"BROOKLYN - OFFLINE":library_photos?"PHOTO %03d - NO GAME YET":"GAME %03d - OFFLINE",ids[chosen]);text(frame,10,147,message[0]?message:line,INK);}else text(frame,10,147,library_photos?"NO PHOTOS ON THIS DATE":"NO GAMES ON THIS DATE",INK);
+ text(frame,10,158,library_photos?"A VIEW PHOTO  X NEXT  B HOME":"A PLAY  X NEXT  B HOME",INK);
+#ifdef PHOTO_NETWORK
+ text(frame,10,169,library_photos?"Y SAVED GAMES":"Y UNFINISHED PHOTOS",INK);
+#endif
+ text(frame,10,181,"PAD DATE  L R MONTH  TAP OPEN",INK);
 }
 static bool save_world(void){
  if(!storage){strcpy(message,"SD UNAVAILABLE - NOT SAVED");return false;}
@@ -200,6 +218,8 @@ static void render(void){
 #endif
  text(frame,12,113,"B - RETAKE",INK);text(frame,12,150,message,INK);break;
  case LIBRARY:draw_calendar();break;
+ case SAVED_PHOTO:title("SAVED PHOTO");text(frame,12,54,"NO GAME HAS BEEN GENERATED YET",INK);text(frame,12,78,"MAKING A NEW GAME USES WIFI",INK);text(frame,12,112,"A - MAKE GAME",INK);text(frame,12,138,"B - BACK TO SAVED PHOTOS",INK);break;
+ case SAVED_ERROR:title("SAVED GAME UNAVAILABLE");text(frame,12,54,"THE LOCAL GAME COULD NOT LOAD",INK);text(frame,12,78,"YOUR ORIGINAL PHOTO IS KEPT",INK);text(frame,12,125,"B - BACK TO SAVED GAMES",INK);break;
  case PLAY:
  if(active_generated){world_render(frame,&generated,&generated_player);rect(frame,0,0,256,27,WHITE);char line[42];snprintf(line,sizeof(line),"%.40s",generated.objective);text(frame,5,4,line,INK);snprintf(line,sizeof(line),"%.40s",strlen(generated.objective)>40?generated.objective+40:"");text(frame,5,15,line,INK);rect(frame,0,177,256,15,WHITE);text(frame,4,181,"PAD MOVE A JUMP HOLD A HIGH B SLOW",INK);break;}
  if(active_brooklyn){brooklyn_render(frame,&brooklyn);rect(frame,0,0,256,28,WHITE);char line[40];snprintf(line,sizeof(line),"RETURN THE BAG    FLAGS %d OF 3",brooklyn.checkpoint);text(frame,7,4,line,INK);text(frame,7,16,brooklyn.weather_left<3?"GUST CHANGING SOON":brooklyn.wind==1?"TAILWIND":brooklyn.wind==2?"CROSSWIND - STEER LEFT":"CALM",INK);rect(frame,0,166,256,26,WHITE);text(frame,3,170,brooklyn.z<11?"UP FORWARD  LEFT RIGHT STEER":brooklyn.z<18?"HOLD UP - TAP A BEFORE GAP":brooklyn.z<30?"HOLD B AND UP TO DUCK UNDER":brooklyn.z<46?"HOLD UP AND A TO GLIDE":brooklyn.z<54?"LAST GAP - HOLD UP AND A":"RETURN BAG TO THE PERSON",INK);text(frame,3,182,"A JUMP-HOLD GLIDE B DUCK START PAUSE",INK);}else draw_game();break;
@@ -231,7 +251,7 @@ int main(void){
  case HOME:
  if(p&(KEY_UP|KEY_DOWN))selection^=1;
  if(p&KEY_TOUCH){touchPosition touch;touchRead(&touch);if(touch.px>=12&&touch.px<244){if(touch.py>=55&&touch.py<85){selection=0;p|=KEY_A;}if(touch.py>=100&&touch.py<130){selection=1;p|=KEY_A;}}}
- if(p&KEY_A){message[0]=0;if(!selection)start_camera();else open_calendar();}break;
+ if(p&KEY_A){message[0]=0;if(!selection)start_camera();else{library_photos=false;open_calendar();}}break;
  case CAMERA:camera_tick(p);break;
  case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){
 #ifdef PHOTO_NETWORK
@@ -255,15 +275,28 @@ int main(void){
  break;
  case LIBRARY:{
  bool moved=false;if(p&KEY_B){state=HOME;break;}
+#ifdef PHOTO_NETWORK
+ if(p&KEY_Y){library_photos=!library_photos;open_calendar();break;}
+#endif
  int delta=(!!(p&KEY_RIGHT)-!!(p&KEY_LEFT))+7*(!!(p&KEY_DOWN)-!!(p&KEY_UP));if(delta){selected_date=date_move(selected_date,delta);moved=true;}
  int month=!!(p&KEY_R)-!!(p&KEY_L);if(month){selected_date=date_month(selected_date,month);moved=true;}
  if(p&KEY_TOUCH){touchPosition t;touchRead(&t);if(t.px>=10&&t.px<255&&t.py>=45&&t.py<147){int d=(t.py-45)/17*7+(t.px-10)/35-date_weekday((Date){selected_date.year,selected_date.month,1})+1;if(d>0&&d<=date_days(selected_date.year,selected_date.month)){if(d==selected_date.day)p|=KEY_A;else{selected_date.day=d;moved=true;}}}}
  if(moved)calendar_preview(false);else if(p&KEY_X)calendar_preview(true);
- if((p&KEY_A)&&chosen>=0&&load_world(ids[chosen])){
+ if((p&KEY_A)&&chosen>=0){
+ if(!load_world(ids[chosen])){clear_inputs();state=SAVED_ERROR;break;}
 #ifdef PHOTO_NETWORK
- if(!active_brooklyn&&!active_generated)begin_generation();else
+ // Opening the library or a saved item must never initialize networking.
+ // Missing/corrupt packages stay local; generation needs a separate press.
+ if(!active_brooklyn&&!active_generated){clear_inputs();state=library_photos?SAVED_PHOTO:SAVED_ERROR;}else
 #endif
  {reset_game();state=PLAY;}}break;}
+ case SAVED_PHOTO:
+ if(p&KEY_B){open_calendar();break;}
+#ifdef PHOTO_NETWORK
+ if(p&KEY_A)begin_generation();
+#endif
+ break;
+ case SAVED_ERROR:if(p&KEY_B)open_calendar();break;
  case PLAY:
  // Replay every display-tick input in order, even if drawing skipped frames.
  for(unsigned i=0;i<n&&state==PLAY;i++){
