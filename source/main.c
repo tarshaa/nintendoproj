@@ -12,6 +12,7 @@
 #include "generated_world.h"
 #ifdef PHOTO_NETWORK
 #include "photo_network.h"
+#include "photo_wifi.h"
 #endif
 #include <time.h>
 #define W 256
@@ -50,7 +51,7 @@ static WorldPlayer generated_player;
 static Date dates[1000],selected_date;
 static unsigned today(void){time_t t=time(NULL);struct tm *d=localtime(&t);Date v={d?d->tm_year+1900:2026,d?d->tm_mon+1:10,d?d->tm_mday:18};if(!date_valid(v))v=(Date){2026,10,18};return date_pack(v);}
 static void reset_game(void){clear_inputs();game_reset(&game);brooklyn_reset(&brooklyn);if(active_generated)world_reset(&generated_player,&generated);}
-typedef enum {HOME,CAMERA,REVIEW,LIBRARY,SAVED_PHOTO,SAVED_ERROR,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN,GENERATE,GENERATION_ERROR} State;
+typedef enum {HOME,WIFI_SCREEN,WIFI_HELP,CAMERA,REVIEW,LIBRARY,SAVED_PHOTO,SAVED_ERROR,PLAY,PAUSE,WIN,LOSE,ERROR_SCREEN,GENERATE,GENERATION_ERROR} State;
 static State state=HOME;
 static u16 sky=RGB15(12,22,31),grass=RGB15(12,25,8);
 static const unsigned char glyphs[][7]={
@@ -77,6 +78,16 @@ static void text(u16 *p,int x,int y,const char*s,u16 c){
 }
 static void title(const char*s){rect(frame,0,0,W,H,WHITE);text(frame,14,14,s,INK);}
 static void button(int y,const char*s,bool active){rect(frame,12,y,232,30,active?INK:RGB15(25,27,27));text(frame,22,y+11,s,active?WHITE:INK);}
+#ifdef PHOTO_NETWORK
+static bool tapped(int p,int y,int h){touchPosition t;if(!(p&KEY_TOUCH))return false;touchRead(&t);return t.px>=12&&t.px<244&&t.py>=y&&t.py<y+h;}
+static void draw_wifi(void){
+ PhotoWifiState status=photo_wifi_state();title("WIFI AND HOTSPOT");
+ text(frame,14,43,status==PHOTO_WIFI_CONNECTED?"CONNECTED":status==PHOTO_WIFI_CONNECTING?"CONNECTING":status==PHOTO_WIFI_FAILED?"COULD NOT CONNECT":"NOT CONNECTED",INK);
+ text(frame,14,65,photo_wifi_message(),INK);
+ button(102,status==PHOTO_WIFI_CONNECTED?"A - DISCONNECT":status==PHOTO_WIFI_CONNECTING?"A - CANCEL":status==PHOTO_WIFI_FAILED?"A - TRY AGAIN":"A - CONNECT",true);
+ text(frame,14,147,"Y - HOTSPOT HELP",INK);text(frame,14,178,"B - BACK",INK);
+}
+#endif
 static void path_for(char *p,int id,const char*ext){if(id==0)snprintf(p,96,"sd:/photo-worlds/brooklyn.%s",ext);else snprintf(p,96,"sd:/photo-worlds/world-%03d.%s",id,ext);}
 static unsigned checksum(const u16*p){unsigned h=2166136261u;for(int i=0;i<PIXELS;i++){h^=p[i];h*=16777619u;}return h;}
 static bool load_generated(int id){
@@ -130,6 +141,10 @@ static void calendar_preview(bool cycle){
  if(chosen<0||!load_world(ids[chosen])){rect(top,0,0,W,H,INK);text(top,20,90,chosen<0?(library_photos?"NO PHOTOS ON THIS DATE":"NO GAMES ON THIS DATE"):"SAVED FILE COULD NOT LOAD",WHITE);if(chosen>=0)strcpy(message,"FILE DAMAGED");}
 }
 static void open_calendar(void){
+#ifdef PHOTO_NETWORK
+ // Browsing/playing local saves always leaves the radio off.
+ photo_network_close();
+#endif
  scan_worlds();selected_date=date_unpack(today());bool found=false;
  for(int i=0;i<count;i++)if(library_item(i)&&(!found||date_pack(dates[i])>date_pack(selected_date))){selected_date=dates[i];found=true;}
  chosen=-1;calendar_preview(false);clear_inputs();state=LIBRARY;
@@ -208,7 +223,19 @@ static void render(void){
 #else
  title("PHOTO WORLDS - TEST BUILD");
 #endif
- button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);break;
+ button(55,"CAPTURE GAME",selection==0);button(100,"VIEW SAVED GAMES",selection==1);
+#ifdef PHOTO_NETWORK
+ rect(frame,12,139,232,26,RGB15(27,28,27));text(frame,22,149,"X - WIFI AND HOTSPOT",INK);text(frame,14,178,"UP DOWN SELECT - A OPEN",INK);
+#else
+ text(frame,14,154,"UP DOWN SELECT - A OPEN",INK);text(frame,14,170,storage?"SD READY":"SD UNAVAILABLE",INK);
+#endif
+ break;
+ case WIFI_SCREEN:
+#ifdef PHOTO_NETWORK
+ draw_wifi();
+#endif
+ break;
+ case WIFI_HELP:title("HOTSPOT HELP");text(frame,14,44,"ON YOUR IPHONE:",INK);text(frame,14,62,"1 TURN ON ALLOW OTHERS TO JOIN",INK);text(frame,14,80,"2 TURN ON MAXIMIZE COMPATIBILITY",INK);text(frame,14,106,"KEEP IPHONE NEAR YOUR DSI",INK);text(frame,14,132,"NEW NETWORK: SAVE IT IN THE DSI",INK);text(frame,14,146,"SYSTEM SETTINGS FIRST",INK);text(frame,14,178,"B - BACK",INK);break;
  case CAMERA:title("CAMERA");text(frame,14,55,"A OR L OR R - TAKE PHOTO",INK);text(frame,14,80,"Y - SWITCH CAMERA",INK);text(frame,14,105,"B - HOME",INK);text(frame,14,153,"PREVIEW CAPTURE 256 X 192",INK);break;
  case REVIEW:title("PHOTO READY");
 #ifdef PHOTO_NETWORK
@@ -247,11 +274,33 @@ int main(void){
  irqSet(IRQ_VBLANK,sample_input);irqEnable(IRQ_VBLANK);
  while(1){wait_frame();InputSample samples[INPUT_CAPACITY];int irq=enterCriticalSection();unsigned n=input_drain(&inputs,samples);leaveCriticalSection(irq);
  int p=0;for(unsigned i=0;i<n;i++)p|=samples[i].pressed;render_ticks=n;
+#ifdef PHOTO_NETWORK
+ if(state!=GENERATE)photo_wifi_tick();
+#endif
  switch(state){
  case HOME:
+#ifdef PHOTO_NETWORK
+ if((p&KEY_X)||tapped(p,139,26)){clear_inputs();state=WIFI_SCREEN;break;}
+#endif
  if(p&(KEY_UP|KEY_DOWN))selection^=1;
  if(p&KEY_TOUCH){touchPosition touch;touchRead(&touch);if(touch.px>=12&&touch.px<244){if(touch.py>=55&&touch.py<85){selection=0;p|=KEY_A;}if(touch.py>=100&&touch.py<130){selection=1;p|=KEY_A;}}}
  if(p&KEY_A){message[0]=0;if(!selection)start_camera();else{library_photos=false;open_calendar();}}break;
+ case WIFI_SCREEN:
+#ifdef PHOTO_NETWORK
+ if((p&KEY_B)||tapped(p,168,24)){if(photo_wifi_state()==PHOTO_WIFI_CONNECTING)photo_wifi_disconnect();clear_inputs();state=HOME;break;}
+ if((p&KEY_Y)||tapped(p,138,25)){clear_inputs();state=WIFI_HELP;break;}
+ if((p&KEY_A)||tapped(p,102,30)){
+  PhotoWifiState status=photo_wifi_state();
+  if(status==PHOTO_WIFI_CONNECTED||status==PHOTO_WIFI_CONNECTING)photo_wifi_disconnect();else photo_wifi_connect();
+  clear_inputs();
+ }
+#endif
+ break;
+ case WIFI_HELP:
+#ifdef PHOTO_NETWORK
+ if((p&KEY_B)||tapped(p,168,24)){clear_inputs();state=WIFI_SCREEN;}
+#endif
+ break;
  case CAMERA:camera_tick(p);break;
  case REVIEW:if(p&KEY_B)start_camera();else if(p&KEY_A){if(save_world()){
 #ifdef PHOTO_NETWORK

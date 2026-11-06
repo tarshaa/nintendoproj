@@ -43,6 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test movement, obstacles, failure and completion
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -DPHOTO_NETWORK -Dtime=wifi_test_time -Itests/wifi_stubs source/photo_wifi.c tests/photo_wifi_test.c -o /tmp/wifi-tests
+          /tmp/wifi-tests
           cc -Wall -Wextra -Werror -fsanitize=address,undefined source/game.c tests/game_test.c -o /tmp/game-tests
           /tmp/game-tests
           cc -Wall -Wextra -Werror -fsanitize=address,undefined source/brooklyn.c source/calendar.c tests/brooklyn_test.c -lm -o /tmp/brooklyn-tests

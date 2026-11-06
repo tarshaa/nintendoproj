@@ -1,5 +1,6 @@
 #ifdef PHOTO_NETWORK
 #include "photo_network.h"
+#include "photo_wifi.h"
 #include <curl/curl.h>
 #include <dswifi9.h>
 #include <nds.h>
@@ -11,10 +12,11 @@ static NetStage stage;
 static CURLM *multi;static CURL *easy;static struct curl_slist *headers;
 static char base[240],token[80],url[320],job[33],message[160];
 static unsigned char response[4096],*upload;static size_t used,upload_size;
-static time_t began,next_poll;static bool wifi_started,curl_started;
+static time_t began,next_poll;static bool curl_started;
 static const char probe[]="Photo Worlds encrypted round trip v1";
 static void cleanup_request(void){if(easy){if(multi)curl_multi_remove_handle(multi,easy);curl_easy_cleanup(easy);easy=NULL;}if(multi){curl_multi_cleanup(multi);multi=NULL;}curl_slist_free_all(headers);headers=NULL;}
-void photo_network_close(void){cleanup_request();free(upload);upload=NULL;upload_size=0;if(wifi_started){Wifi_DisconnectAP();Wifi_DisableWifi();wifi_started=false;}if(curl_started){curl_global_cleanup();curl_started=false;}memset(token,0,sizeof(token));}
+static void clear_transfer(void){cleanup_request();free(upload);upload=NULL;upload_size=0;if(curl_started){curl_global_cleanup();curl_started=false;}memset(token,0,sizeof(token));}
+void photo_network_close(void){clear_transfer();photo_wifi_disconnect();}
 static void fail(const char*s){snprintf(message,sizeof(message),"%s",s);stage=NET_FAILED;photo_network_close();}
 static size_t receive(char*data,size_t size,size_t n,void*arg){(void)arg;if(size&&n>sizeof(response)/size)return 0;size_t len=size*n;if(len>sizeof(response)-used-1)return 0;memcpy(response+used,data,len);used+=len;response[used]=0;return len;}
 static bool start_request(const char *path,const void*body,size_t size){
@@ -34,7 +36,7 @@ static bool start_request(const char *path,const void*body,size_t size){
 }
 static bool line(FILE*f,char*out,size_t size){if(!fgets(out,(int)size,f))return false;char*p=strpbrk(out,"\r\n");if(p)*p=0;return out[0]!=0;}
 bool photo_network_begin(const char*path){
- photo_network_close();stage=NET_IDLE;used=0;
+ clear_transfer();stage=NET_IDLE;used=0;
  FILE*f=fopen("sd:/photo-worlds/network.cfg","r");if(!f){fail("Setup needed: network.cfg missing");return false;}
  bool valid=line(f,base,sizeof(base))&&line(f,token,sizeof(token));fclose(f);
  if(!valid||strncmp(base,"https://",8)||strpbrk(base," \t?#@")||strlen(token)!=64){fail("Network setup is invalid");return false;}
@@ -49,25 +51,16 @@ bool photo_network_begin(const char*path){
  if(!isDSiMode()){fail("Start in DSi mode through Unlaunch");return false;}
  if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK){fail("TLS initialization failed");return false;}
  curl_started=true;
- if(!Wifi_CheckInit()&&!Wifi_InitDefault(INIT_ONLY|WIFI_ATTEMPT_DSI_MODE)){fail("DSi WiFi initialization failed");return false;}
- wifi_started=true;Wifi_AutoConnect();began=time(NULL);stage=NET_CONNECT;strcpy(message,"Connecting to saved WiFi");return true;
+ if(!photo_wifi_connect()){fail(photo_wifi_message());return false;}
+ began=time(NULL);stage=NET_CONNECT;strcpy(message,"Connecting to saved WiFi");return true;
 }
 void photo_network_tick(bool cancel){
  if(cancel){photo_network_close();stage=NET_CANCELLED;strcpy(message,"Cancelled; photo stays saved");return;}
  if(stage<NET_CONNECT||stage>NET_FETCH)return;
  time_t now=time(NULL);if(now-began>180){fail("Timed out; photo saved. A retries");return;}
- if(stage==NET_CONNECT){int status=Wifi_AssocStatus();
-  if(status==ASSOCSTATUS_CANNOTCONNECT){fail("WiFi could not join saved network");return;}
-  if(now-began>35){
-   if(status==ASSOCSTATUS_SEARCHING)fail("WiFi timeout finding saved hotspot");
-   else if(status==ASSOCSTATUS_ACQUIRINGDHCP)fail("WiFi joined; no network address yet");
-   else fail("WiFi timeout joining saved hotspot");
-   return;
-  }
-  if(status!=ASSOCSTATUS_ASSOCIATED){
-   const char*step=status==ASSOCSTATUS_SEARCHING?"Finding saved hotspot":status==ASSOCSTATUS_ACQUIRINGDHCP?"Getting network address":"Joining saved hotspot";
-   snprintf(message,sizeof(message),"%s - %ld seconds",step,(long)(now-began));return;
-  }
+ if(stage==NET_CONNECT){photo_wifi_tick();
+  if(photo_wifi_state()==PHOTO_WIFI_FAILED){fail(photo_wifi_message());return;}
+  if(photo_wifi_state()!=PHOTO_WIFI_CONNECTED){snprintf(message,sizeof(message),"%s",photo_wifi_message());return;}
   stage=NET_PROBE;strcpy(message,"Checking encrypted connection");start_request("/v1/probe",probe,sizeof(probe)-1);return;}
  if(stage==NET_WAIT){if(now<next_poll)return;char path[64];snprintf(path,sizeof(path),"/v1/jobs/%s",job);stage=NET_FETCH;start_request(path,NULL,0);return;}
  int running=0;if(curl_multi_perform(multi,&running)!=CURLM_OK){fail("Transfer interrupted; A retries");return;}
